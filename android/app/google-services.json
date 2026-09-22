@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "20490880798",
+    "project_id": "financeapp-506923",
+    "storage_bucket": "financeapp-506923.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:20490880798:android:fd92390eafc4f2f18eab0f",
+        "android_client_info": {
+          "package_name": "zahed.com.finance_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAyJ6sDDXsqdfYDT-ykXvnIKnxP0vTwtoU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
