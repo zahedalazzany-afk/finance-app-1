@@ -1245,10 +1245,10 @@ class FinanceProvider extends ChangeNotifier {
 
   bool deleteLandPlot(String id) {
     final used = _incomes.any((e) => e.landPlotId == id) ||
-        _expenses.any((e) => e.landPlotId == id) ||
-        _zahras.any((e) => e.landPlotId == id) ||
         _landEvents.any((e) => e.landPlotId == id) ||
-        _partnerships.any((e) => e.landPlotId == id);
+        _partnerships.any((e) => e.landPlotId == id) ||
+        _workRecords.any((e) => e.landPlotId == id) ||
+        _zakatEntries.any((e) => e.landPlotId == id);
     if (used) return false;
     _landPlots.removeWhere((e) => e.id == id);
     _saveRefData();
@@ -1299,9 +1299,7 @@ class FinanceProvider extends ChangeNotifier {
   }
 
   bool deleteZahra(String id) {
-    final used = _incomes.any((e) => e.zahraId == id) ||
-        _expenses.any((e) => e.zahraId == id) ||
-        _landEvents.any((e) => e.zahraId == id);
+    final used = _incomes.any((e) => e.zahraId == id);
     if (used) return false;
     _zahras.removeWhere((e) => e.id == id);
     _saveRefData();
@@ -3081,8 +3079,7 @@ class FinanceProvider extends ChangeNotifier {
   }
 
   bool deleteWorker(String id) {
-    final used = _expenses.any((e) => e.workerId == id) ||
-        _workRecords.any((r) => r.workerId == id);
+    final used = _expenses.any((e) => e.workerId == id);
     if (used) return false;
     _workers.removeWhere((e) => e.id == id);
     _saveRefData();
@@ -4060,7 +4057,11 @@ class FinanceProvider extends ChangeNotifier {
     final hasHistory = _storageItems.any((s) => s.productId == current.id) ||
         _purchaseItems.any((p) => p.productId == current.id) ||
         _productIngredients.any((e) => e.productId == current.id) ||
-        _inventoryTransactions.any((t) => t.productId == current.id);
+        _inventoryTransactions.any(
+          (t) => _storageItems.any(
+            (s) => s.id == t.itemId && s.productId == current.id,
+          ),
+        );
 
     // الرصيد الحالي لا يُعدّل يدويًا بعد بدء استخدام المنتج؛ فهو ناتج
     // عن حركات المخزون/المشتريات.
@@ -4089,7 +4090,11 @@ class FinanceProvider extends ChangeNotifier {
     final used = _storageItems.any((s) => s.productId == id) ||
         _purchaseItems.any((p) => p.productId == id) ||
         _productIngredients.any((e) => e.productId == id) ||
-        _inventoryTransactions.any((t) => t.productId == id);
+        _inventoryTransactions.any(
+          (t) => _storageItems.any(
+            (s) => s.id == t.itemId && s.productId == id,
+          ),
+        );
     if (used) return false;
     _products.removeWhere((e) => e.id == id);
     _productIngredients.removeWhere((e) => e.productId == id);
@@ -4248,7 +4253,7 @@ class FinanceProvider extends ChangeNotifier {
     if (purchase.paidAmount > 0) {
       _moneyMovements.add(MoneyMovement(
         id: const Uuid().v4(),
-        walletId: paymentWalletId,
+        walletId: paymentWalletId!,
         amount: purchase.paidAmount,
         date: purchase.date,
         purchaseId: purchase.id,
@@ -4453,7 +4458,7 @@ class FinanceProvider extends ChangeNotifier {
     if (purchase.paidAmount > 0) {
       _moneyMovements.add(MoneyMovement(
         id: const Uuid().v4(),
-        walletId: paymentWalletId,
+        walletId: paymentWalletId!,
         amount: purchase.paidAmount,
         date: purchase.date,
         purchaseId: purchase.id,

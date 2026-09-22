@@ -183,6 +183,25 @@ Future<Directory> _getAppBackupDir() async {
   return backupDir;
 }
 
+Future<void> _createLocalBackupSnapshot() async {
+  final jsonStr = await _collectAllData();
+  final timestamp =
+      DateFormat('yyyy-MM-dd_HH-mm-ss').format(DateTime.now());
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(
+    'last_backup_timestamp',
+    DateTime.now().toIso8601String(),
+  );
+
+  if (!kIsWeb) {
+    final dir = await _getAppBackupDir();
+    final file = File(
+      '${dir.path}/backup_$timestamp.json',
+    );
+    await file.writeAsString(jsonStr);
+  }
+}
+
 // ======================= LOCAL BACKUP TAB =======================
 
 class _LocalBackupTab extends StatefulWidget {
@@ -1043,7 +1062,7 @@ class _DriveBackupTabState extends State<_DriveBackupTab> {
     try {
       // لقطة أمان محلية قبل استعادة نسخة Drive، حتى يمكن التراجع عملياً
       // إذا كانت النسخة السحابية قديمة أو غير مناسبة.
-      await _createLocalBackup(showToast: false);
+      await _createLocalBackupSnapshot();
       final jsonStr = await _drive.downloadBackup(file.id!);
       if (!mounted) return;
       await _applyData(jsonStr, context);
