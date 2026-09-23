@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
@@ -105,10 +106,30 @@ class FinanceProvider extends ChangeNotifier {
     await prefs.setString('app_theme_mode', mode == ThemeMode.dark ? 'dark' : 'light');
   }
 
+  /// إجمالي الإيرادات بعد تحويل كل عملية إلى العملة الأساسية.
+  /// لا يجوز جمع مبالغ بعملات مختلفة مباشرة.
   double get totalIncome => _incomes
       .where((i) => i.status == 'confirmed')
-      .fold(0, (sum, i) => sum + i.amount);
-  double get totalExpenses => _expenses.fold(0, (sum, e) => sum + e.amount);
+      .fold<double>(
+        0,
+        (sum, i) => sum + toBaseCurrency(
+          i.amount,
+          i.currency,
+          i.exchangeRate,
+        ),
+      );
+
+  /// إجمالي المصروفات بعد تحويل كل عملية إلى العملة الأساسية.
+  double get totalExpenses => _expenses.fold<double>(
+        0,
+        (sum, e) => sum + toBaseCurrency(
+          e.amount,
+          e.currency,
+          e.exchangeRate,
+        ),
+      );
+
+  /// الرصيد الصافي بالعملة الأساسية.
   double get netBalance => totalIncome - totalExpenses;
   double get overallExpenseRatio =>
       totalIncome > 0 ? (totalExpenses / totalIncome) * 100 : 0;
@@ -253,28 +274,12 @@ class FinanceProvider extends ChangeNotifier {
       }
     }
 
-    // 2. مزامنة الحصص المسددة تاريخياً التي تفتقر لسند حركة نقدية في الصندوق
-    for (final d in _distributions) {
-      if (d.isPaid) {
-        final hasMovement = _moneyMovements.any((m) => m.distributionId == d.id);
-        if (!hasMovement) {
-          final inc = _incomes.firstWhereOrNull((i) => i.id == d.incomeId);
-          final effectiveWalletId = inc?.walletId ??
-              defaultWallet()?.id ??
-              (_wallets.isNotEmpty ? _wallets.first.id : '');
-          _moneyMovements.add(MoneyMovement(
-            id: const Uuid().v4(),
-            walletId: effectiveWalletId,
-            amount: d.amount,
-            date: d.paidDate ?? inc?.date ?? DateTime.now(),
-            distributionId: d.id,
-            incomeId: inc?.id,
-            note: 'تسديد حصة شريك (تسوية نظام)',
-          ));
-          changed = true;
-        }
-      }
-    }
+    // 2. لا ننشئ حركة نقدية اصطناعية للحصة المسددة التي لا تملك حركة محفوظة.
+    // الحركة النقدية هي سجل مالي فعلي ويجب أن تحتوي على المحفظة والعملة
+    // ومصدر التمويل الصحيح. إعادة بنائها تلقائيًا من Distribution وحدها
+    // قد تغيّر أرصدة المحافظ أو تنشئ حركة بعملة/تمويل غير معروفين.
+    // لذلك نحافظ على حالة isPaid التاريخية كما هي، ونترك إنشاء الحركة
+    // لعملية السداد الأصلية فقط.
 
     if (changed) {
       _saveRefData();
@@ -932,13 +937,36 @@ class FinanceProvider extends ChangeNotifier {
     }
   }
 
-  void deleteIncome(String id) {
-    // حذف الإيراد لا يعني حذف المصروف نفسه. المصروف سجل مستقل، وقد يكون
-    // ممولاً من أكثر من إيراد. نحذف فقط تخصيصات هذا الإيراد/دفعاته.
+  bool deleteIncome(String id) {
+    // لا نحذف دفعات الإيراد إذا كانت مستخدمة كمصدر تمويل لسجلات مالية
+    // أخرى؛ حذفها في هذه الحالة يترك مراجع تمويل يتيمة ويشوّه الرصيد
+    // التاريخي. تخصيصات المصروفات المباشرة يمكن تنظيفها بأمان، لكن
+    // التمويل المسجل في دفعات المصروفات/الزكاة/الحركات النقدية يجب حمايته.
     final removedPaymentIds = _incomePayments
         .where((p) => p.incomeId == id)
         .map((p) => p.id)
         .toSet();
+
+    if (removedPaymentIds.isEmpty && !_incomes.any((i) => i.id == id)) {
+      return false;
+    }
+
+    final usedInExpensePayments = _expensePayments.any((p) =>
+        p.funding.any((a) =>
+            a.paymentId != null && removedPaymentIds.contains(a.paymentId)));
+    final usedInZakatPayments = _zakatPayments.any((p) =>
+        p.funding.any((a) =>
+            a.paymentId != null && removedPaymentIds.contains(a.paymentId)));
+    final usedInMoneyMovements = _moneyMovements.any((m) =>
+        m.funding.any((a) =>
+            a.paymentId != null && removedPaymentIds.contains(a.paymentId)));
+
+    if (usedInExpensePayments || usedInZakatPayments || usedInMoneyMovements) {
+      throw Exception(
+        'لا يمكن حذف الإيراد لأن إحدى دفعاته مستخدمة كمصدر تمويل في عملية مالية أخرى. '
+        'ألغِ أو عدّل العمليات المرتبطة أولاً.',
+      );
+    }
 
     for (final expense in _expenses) {
       expense.allocations.removeWhere((a) =>
@@ -979,6 +1007,7 @@ class FinanceProvider extends ChangeNotifier {
     _rebuildLinkedExpenses();
     _saveAll();
     notifyListeners();
+    return true;
   }
 
   // --- Expense CRUD ---
@@ -1118,7 +1147,7 @@ class FinanceProvider extends ChangeNotifier {
 
   /// مجموع المبالغ المرتبطة بدفعة استلام محددة عبر:
   /// استقطاعات المصروفات + تمويل دفعات المصروف + تمويل حركات الصرف + تصريفاتها القديمة.
-  double fundedForPayment(String paymentId) {
+  double fundedForPayment(String paymentId, {String? excludeMovementId}) {
     double sum = 0;
     for (final ep in _expensePayments) {
       for (final a in ep.funding) {
@@ -1126,6 +1155,7 @@ class FinanceProvider extends ChangeNotifier {
       }
     }
     for (final m in _moneyMovements) {
+      if (m.id == excludeMovementId) continue;
       for (final a in m.funding) {
         if (a.paymentId == paymentId) sum += a.amount;
       }
@@ -1135,7 +1165,7 @@ class FinanceProvider extends ChangeNotifier {
 
   /// المبلغ المتاح من دفعة استلام (متبقي الدفعة − مصروفاتها − تصريفاتها − تمويلها).
   /// عند تعديل مصروف، نستثني حصته القديمة عبر [excludeExpenseId].
-  double paymentAvailable(String paymentId, {String? excludeExpenseId}) {
+  double paymentAvailable(String paymentId, {String? excludeExpenseId, String? excludeMovementId}) {
     final payment = _incomePayments.firstWhereOrNull((p) => p.id == paymentId);
     if (payment == null) return 0;
     final expenses = _expenses.fold<double>(0, (sum, e) {
@@ -1147,40 +1177,64 @@ class FinanceProvider extends ChangeNotifier {
     });
     return (payment.amount -
             expenses -
-            disbursedForPayment(paymentId) -
-            fundedForPayment(paymentId))
+            disbursedForPayment(paymentId, excludeMovementId: excludeMovementId) -
+            fundedForPayment(paymentId, excludeMovementId: excludeMovementId))
         .clamp(0.0, double.infinity);
   }
 
   /// يتحقق من صلاحية تمويل عملية صرف من دفعات الاستلام.
   /// يرمي استثناءً إذا تجاوز أي مبلغ المتاح من الدفعة.
-  void validateFunding(List<ExpenseAllocation> funding) {
+  void validateFunding(List<ExpenseAllocation> funding, {String? excludeMovementId}) {
     final usedByPayment = <String, double>{};
     final usedByDebtSettlement = <String, double>{};
     for (final a in funding) {
+      if (a.amount <= 0.001) {
+        throw Exception('مبلغ التمويل يجب أن يكون أكبر من صفر');
+      }
+
       final paymentId = a.paymentId;
+      final settlementId = a.debtSettlementId;
+      if (paymentId == null && settlementId == null) {
+        throw Exception('كل مصدر تمويل يجب أن يرتبط بدفعة إيراد أو دفعة دين محددة');
+      }
+      if (paymentId != null && settlementId != null) {
+        throw Exception('لا يمكن أن يرتبط مصدر التمويل بدفعة إيراد ودفعة دين في الوقت نفسه');
+      }
+
       if (paymentId != null) {
-        final payment = _incomePayments.firstWhereOrNull((p) => p.id == paymentId);
-        if (payment != null && a.currency != payment.currency) {
+        final payment =
+            _incomePayments.firstWhereOrNull((p) => p.id == paymentId);
+        if (payment == null) {
+          throw Exception('دفعة الإيراد المستخدمة في التمويل غير موجودة');
+        }
+        if (a.currency != payment.currency) {
           throw Exception('لا يمكن تمويل العملية بعملة مختلفة عن عملة الدفعة');
         }
         final used = (usedByPayment[paymentId] ?? 0) + a.amount;
         usedByPayment[paymentId] = used;
-        final available = paymentAvailable(paymentId);
+        final available =
+            paymentAvailable(paymentId, excludeMovementId: excludeMovementId);
         if (used > available + 0.001) {
           throw Exception(
               'المبلغ يتجاوز المتاح في الدفعة ($available ${available.toStringAsFixed(2)} ر.ي)');
         }
       }
-      final settlementId = a.debtSettlementId;
+
       if (settlementId != null) {
-        final source = debtFundingSources.firstWhereOrNull((s) => s.id == settlementId);
-        if (source != null && a.currency != source.currency) {
+        final source =
+            debtFundingSources.firstWhereOrNull((s) => s.id == settlementId);
+        if (source == null) {
+          throw Exception('مصدر تمويل الدين المستخدم غير موجود');
+        }
+        if (a.currency != source.currency) {
           throw Exception('لا يمكن تمويل العملية بعملة مختلفة عن عملة الدفعة');
         }
         final used = (usedByDebtSettlement[settlementId] ?? 0) + a.amount;
         usedByDebtSettlement[settlementId] = used;
-        final available = debtFundingAvailable(settlementId);
+        final available = debtFundingAvailable(
+          settlementId,
+          excludeMovementId: excludeMovementId,
+        );
         if (used > available + 0.001) {
           throw Exception(
               'المبلغ يتجاوز المتاح من دفعة الدين (${available.toStringAsFixed(2)} ر.ي)');
@@ -1190,27 +1244,66 @@ class FinanceProvider extends ChangeNotifier {
   }
 
   void _validateExpenseAllocations(Expense expense, String? excludeExpenseId) {
+    final consumedByPayment = <String, double>{};
+    final consumedByDebtSource = <String, double>{};
+
     for (final alloc in expense.allocations) {
+      if (alloc.amount <= 0.001) {
+        throw Exception('مبلغ تخصيص المصروف يجب أن يكون أكبر من صفر');
+      }
+
       final paymentId = alloc.paymentId;
+      final debtSourceId = alloc.debtSettlementId;
+      if (paymentId != null && debtSourceId != null) {
+        throw Exception(
+          'لا يمكن أن يرتبط تخصيص المصروف بدفعة إيراد ومصدر تمويل دين في الوقت نفسه',
+        );
+      }
+      if (paymentId == null && debtSourceId == null) {
+        throw Exception(
+          'كل تخصيص للمصروف يجب أن يرتبط بدفعة إيراد أو مصدر تمويل دين',
+        );
+      }
+
       if (paymentId != null) {
-        final available = paymentAvailable(paymentId,
-            excludeExpenseId: excludeExpenseId);
-        final consumed = expense.allocations
-            .where((a) => a.paymentId == paymentId)
-            .fold(0.0, (s, a) => s + a.amount);
+        final payment =
+            _incomePayments.firstWhereOrNull((p) => p.id == paymentId);
+        if (payment == null) {
+          throw Exception('دفعة الإيراد المرتبطة بالمصروف غير موجودة');
+        }
+        if (alloc.currency != payment.currency) {
+          throw Exception('عملة تخصيص المصروف لا تطابق عملة دفعة الإيراد');
+        }
+
+        final consumed =
+            (consumedByPayment[paymentId] ?? 0) + alloc.amount;
+        consumedByPayment[paymentId] = consumed;
+        final available = paymentAvailable(
+          paymentId,
+          excludeExpenseId: excludeExpenseId,
+        );
         if (consumed > available + 0.001) {
           throw Exception('المصروف يتجاوز المتاح في الدفعة المختارة');
         }
       }
-      final debtSourceId = alloc.debtSettlementId;
+
       if (debtSourceId != null) {
+        final source = debtFundingSources
+            .firstWhereOrNull((s) => s.id == debtSourceId);
+        if (source == null) {
+          throw Exception('مصدر تمويل الدين المرتبط بالمصروف غير موجود');
+        }
+        if (alloc.currency != source.currency) {
+          throw Exception('عملة تخصيص المصروف لا تطابق عملة مصدر تمويل الدين');
+        }
+
+        final consumed =
+            (consumedByDebtSource[debtSourceId] ?? 0) + alloc.amount;
+        consumedByDebtSource[debtSourceId] = consumed;
         final available = debtFundingAvailable(
           debtSourceId,
           excludeExpenseId: excludeExpenseId,
         );
-        final consumed = expense.allocations
-            .where((a) => a.debtSettlementId == debtSourceId)
-            .fold(0.0, (s, a) => s + a.amount);
         if (consumed > available + 0.001) {
           throw Exception('المصروف يتجاوز المتاح من دفعة الدين');
         }
@@ -1325,48 +1418,97 @@ class FinanceProvider extends ChangeNotifier {
   }
 
   void deleteLandEvent(String id) {
-    final txs =
-        _inventoryTransactions.where((t) => t.eventId == id).toList();
-    for (final tx in txs) {
-      final itemIdx = _storageItems.indexWhere((i) => i.id == tx.itemId);
-      if (itemIdx != -1) {
-        if (tx.type == 'in') {
-          _storageItems[itemIdx].quantity =
-              _storageItems[itemIdx].quantity - tx.quantity;
-        } else {
-          _storageItems[itemIdx].quantity += tx.quantity;
-        }
-      }
-      final item = _storageItems.firstWhereOrNull((i) => i.id == tx.itemId);
-      final product = _productForStorageItem(item);
-      if (product != null) {
-        final idx = _products.indexWhere((e) => e.id == product.id);
-        if (idx != -1) {
-          final delta = tx.type == 'in' ? -tx.quantity : tx.quantity;
-          _products[idx] = Product(
-            id: product.id,
-            name: product.name,
-            category: product.category,
-            unit: product.unit,
-            purchasePrice: product.purchasePrice,
-            salePrice: product.salePrice,
-            currentStock: (product.currentStock + delta).toDouble(),
-            minStock: product.minStock,
-            maxPurchasePrice: product.maxPurchasePrice,
-          );
-        }
-      }
-      _inventoryTransactions.removeWhere((t) => t.id == tx.id);
+    final eventExists = _landEvents.any((e) => e.id == id);
+    final eventExpenses = _expenses.where((e) => e.eventId == id).toList();
+    final eventExpenseIds = eventExpenses.map((e) => e.id).toSet();
+    final eventPaymentIds = _expensePayments
+        .where((p) => eventExpenseIds.contains(p.expenseId))
+        .map((p) => p.id)
+        .toSet();
+    final eventDebts = _personalDebts.where((d) => d.eventId == id).toList();
+    final eventDebtIds = eventDebts.map((d) => d.id).toSet();
+    final eventSettlementIds = _personalDebtSettlements
+        .where((s) => eventDebtIds.contains(s.debtId))
+        .map((s) => s.id)
+        .toSet();
+
+    if (!eventExists &&
+        eventExpenses.isEmpty &&
+        eventDebts.isEmpty &&
+        !_inventoryTransactions.any((t) => t.eventId == id)) {
+      return;
     }
-    final eventExpenses =
-        _expenses.where((e) => e.eventId == id).toList();
-    for (final e in eventExpenses) {
-      _expensePayments.removeWhere((p) => p.expenseId == e.id);
-      _expenses.removeWhere((ex) => ex.id == e.id);
+
+    // لا نحذف العملية إذا كانت دفعة أحد مصروفات الحدث أو تسوية أحد ديونه
+    // مستخدمة كمصدر تمويل في عملية مالية أخرى؛ وإلا ستبقى مراجع تمويل يتيمة.
+    final usedEventPaymentFunding = _expenses.any((e) =>
+        e.allocations.any((a) =>
+            a.paymentId != null && eventPaymentIds.contains(a.paymentId)));
+    final usedEventPaymentFundingInPayments = _expensePayments.any((p) =>
+        p.expenseId != null &&
+        !eventExpenseIds.contains(p.expenseId) &&
+        p.funding.any((a) =>
+            a.paymentId != null && eventPaymentIds.contains(a.paymentId)));
+    final usedEventPaymentFundingInZakat = _zakatPayments.any((p) =>
+        p.funding.any((a) =>
+            a.paymentId != null && eventPaymentIds.contains(a.paymentId)));
+    final usedEventPaymentFundingInMovements = _moneyMovements.any((m) =>
+        m.funding.any((a) =>
+            a.paymentId != null && eventPaymentIds.contains(a.paymentId)));
+
+    final usedEventDebtFunding = _expenses.any((e) =>
+        !eventExpenseIds.contains(e.id) &&
+        e.allocations.any((a) =>
+            a.debtSettlementId != null &&
+            eventSettlementIds.contains(a.debtSettlementId)));
+    final usedEventDebtFundingInPayments = _expensePayments.any((p) =>
+        !eventExpenseIds.contains(p.expenseId) &&
+        p.funding.any((a) =>
+            a.debtSettlementId != null &&
+            eventSettlementIds.contains(a.debtSettlementId)));
+    final usedEventDebtFundingInMovements = _moneyMovements.any((m) =>
+        m.funding.any((a) =>
+            a.debtSettlementId != null &&
+            eventSettlementIds.contains(a.debtSettlementId)));
+
+    if (usedEventPaymentFunding ||
+        usedEventPaymentFundingInPayments ||
+        usedEventPaymentFundingInZakat ||
+        usedEventPaymentFundingInMovements ||
+        usedEventDebtFunding ||
+        usedEventDebtFundingInPayments ||
+        usedEventDebtFundingInMovements) {
+      throw Exception(
+        'لا يمكن حذف حدث الأرض لأن إحدى دفعات مصروفاته أو تسويات ديونه مستخدمة كمصدر تمويل في عملية مالية أخرى. '
+        'ألغِ أو عدّل العمليات المرتبطة أولاً.',
+      );
     }
-    _personalDebts.removeWhere((d) => d.eventId == id);
+
+    final eventPaymentMovementIds = _moneyMovements
+        .where((m) => eventPaymentIds.contains(m.paymentId))
+        .map((m) => m.id)
+        .toSet();
+    final eventSettlementMovementIds = _moneyMovements
+        .where((m) => eventSettlementIds.contains(m.debtSettlementId))
+        .map((m) => m.id)
+        .toSet();
+
+    // حركات المخزون مصدر الحقيقة للرصيد؛ لا نعدل كميات المخازن أو المنتجات
+    // يدويًا أثناء حذف الحدث، حتى لا يحدث اختلاف بين الرصيد وسجل الحركات.
+    _inventoryTransactions.removeWhere((t) => t.eventId == id);
+
+    _moneyMovements.removeWhere((m) =>
+        eventPaymentMovementIds.contains(m.id) ||
+        eventSettlementMovementIds.contains(m.id));
+    _expensePayments.removeWhere((p) => eventExpenseIds.contains(p.expenseId));
+    _personalDebtSettlements.removeWhere((s) => eventSettlementIds.contains(s.id));
+    _expenses.removeWhere((e) => eventExpenseIds.contains(e.id));
+    _personalDebts.removeWhere((d) => eventDebtIds.contains(d.id));
     _landEvents.removeWhere((e) => e.id == id);
-    _saveRefData();
+
+    // إعادة بناء أرصدة المخازن والمنتجات من الحركات المتبقية.
+    _reconcileInventoryAndPurchases();
+    _saveAll();
     notifyListeners();
   }
   // --- Warehouse CRUD ---
@@ -1406,10 +1548,45 @@ class FinanceProvider extends ChangeNotifier {
 
   // --- StorageItem CRUD ---
 
-  void addStorageItem(StorageItem item) {
+  bool addStorageItem(StorageItem item) {
+    if (item.id.trim().isEmpty ||
+        item.warehouseId.trim().isEmpty ||
+        item.name.trim().isEmpty ||
+        item.quantity < 0) {
+      return false;
+    }
+    if (!_warehouses.any((w) => w.id == item.warehouseId)) {
+      return false;
+    }
+    if (item.productId != null &&
+        item.productId!.trim().isNotEmpty &&
+        !_products.any((p) => p.id == item.productId)) {
+      return false;
+    }
+    if (_storageItems.any((s) => s.id == item.id)) {
+      return false;
+    }
+
     _storageItems.add(item);
+
+    // الرصيد الافتتاحي يجب أن يدخل في سجل الحركات حتى لا يختفي عند
+    // أول حركة مخزنية لاحقة، لأن _reconcileInventoryAndPurchases يعتمد
+    // على الحركات الفعلية عند وجود تاريخ للمخزون.
+    if (item.quantity > 0.000001) {
+      _inventoryTransactions.insert(0, InventoryTransaction(
+        id: const Uuid().v4(),
+        itemId: item.id,
+        type: 'in',
+        quantity: item.quantity,
+        date: DateTime.now(),
+        notes: 'رصيد افتتاحي للمخزون',
+      ));
+    }
+
+    _reconcileInventoryAndPurchases();
     _saveRefData();
     notifyListeners();
+    return true;
   }
 
   void updateStorageItem(StorageItem updated) {
@@ -1485,6 +1662,16 @@ class FinanceProvider extends ChangeNotifier {
       return false;
     }
     if (_inventoryTransactions.any((t) => t.id == tx.id)) return false;
+
+    // حركة الشراء هي إدخال للمخزون فقط؛ لا يجوز إنشاء حركة صرف مرتبطة
+    // ببند شراء، لأن ذلك يفسد distributedQuantity الخاص بالفاتورة.
+    if (tx.type == 'out' && tx.purchaseItemId != null) return false;
+
+    // التحويل بين المخازن يجب أن يتم عبر transferWarehouseItems حتى تُنشأ
+    // حركة المصدر والوجهة معًا وبنفس transferId. منع إنشاء حركة تحويل منفردة
+    // يحافظ على تكامل سجل التحويلات.
+    if (tx.transferId != null) return false;
+
     final itemIdx = _storageItems.indexWhere((i) => i.id == tx.itemId);
     if (itemIdx == -1) return false;
 
@@ -1538,6 +1725,23 @@ class FinanceProvider extends ChangeNotifier {
 
     // الحركات المرتبطة بتحويل مخزني يجب تعديلها كتحويل كامل.
     if (oldTx.transferId != null || updatedTx.transferId != null) {
+      return false;
+    }
+
+    // الرصيد الافتتاحي يمثل بداية تاريخ المخزون، ولا يجوز تحويله إلى
+    // حركة عادية أو نقله إلى صنف آخر، لأن ذلك يغيّر أساس الرصيد التاريخي.
+    final isOpeningBalance =
+        (oldTx.notes ?? '').trim() == 'رصيد افتتاحي للمخزون';
+    if (isOpeningBalance) {
+      return false;
+    }
+
+    // حركة مرتبطة ببند شراء يجب أن تبقى مرتبطة بنفس بند الشراء ونفس نوع
+    // الإدخال. نقلها أو تحويلها إلى حركة صرف قد يفسد كمية التوزيع في الفاتورة.
+    if (oldTx.purchaseItemId != null &&
+        (updatedTx.type != 'in' ||
+            updatedTx.itemId != oldTx.itemId ||
+            updatedTx.purchaseItemId != oldTx.purchaseItemId)) {
       return false;
     }
 
@@ -1614,6 +1818,14 @@ class FinanceProvider extends ChangeNotifier {
   bool deleteInventoryTransaction(String id) {
     final tx = _inventoryTransactions.firstWhereOrNull((t) => t.id == id);
     if (tx == null) return false;
+
+    // الرصيد الافتتاحي ليس حركة تشغيلية عادية؛ حذفه سيُسقط أساس
+    // المخزون الذي أُنشئ معه العنصر. يجب تعديل/حذف العنصر وفق سياسة
+    // البيانات بدل حذف الحركة التاريخية مباشرة.
+    if ((tx.notes ?? '').trim() == 'رصيد افتتاحي للمخزون') {
+      return false;
+    }
+
     if (tx.transferId != null) {
       deleteWarehouseTransfer(tx.transferId!);
       return true;
@@ -1788,6 +2000,9 @@ class FinanceProvider extends ChangeNotifier {
       throw Exception('دفعة الإيراد موجودة مسبقاً');
     }
     final income = _incomes.firstWhereOrNull((i) => i.id == payment.incomeId);
+    if (income == null) {
+      throw Exception('الإيراد المرتبط بدفعة الإيراد غير موجود');
+    }
     final inheritedCurrency = payment.currency == baseCurrencyCode &&
         income != null && income.currency != baseCurrencyCode
       ? income.currency
@@ -1825,30 +2040,43 @@ class FinanceProvider extends ChangeNotifier {
 
   void deleteIncomePayment(String paymentId) {
     final payment = _incomePayments.firstWhereOrNull((p) => p.id == paymentId);
-    if (payment != null) {
-      _incomePayments.removeWhere((p) => p.id == paymentId);
-      _moneyMovements.removeWhere((m) => m.paymentId == paymentId);
-      final income = _incomes.firstWhereOrNull((i) => i.id == payment.incomeId);
-      income?.removePayment(paymentId);
+    if (payment == null) return;
 
-      // فك تمويل المصروف من الدفعة المحذوفة فقط. قيمة المصروف نفسها
-      // لا تتغير لأنها تمثل قيمة الالتزام الأصلي، وليست مصدر تمويله.
-      for (final e in _expenses) {
-        e.allocations.removeWhere((a) => a.paymentId == paymentId);
-      }
+    // الدفعة قد تكون مستخدمة مباشرة في تخصيصات المصروفات، أو كمصدر
+    // تمويل لدفعات المصروفات/الزكاة/الحركات النقدية. حذفها في هذه الحالة
+    // سيترك السجلات المالية تشير إلى مصدر لم يعد موجوداً، لذلك نرفض الحذف
+    // قبل إجراء أي تعديل على البيانات.
+    final usedDirectlyByExpense = _expenses.any((e) =>
+        e.allocations.any((a) => a.paymentId == paymentId));
+    final usedByExpensePayments = _expensePayments.any((p) =>
+        p.funding.any((a) => a.paymentId == paymentId));
+    final usedByZakatPayments = _zakatPayments.any((p) =>
+        p.funding.any((a) => a.paymentId == paymentId));
+    final usedByMoneyMovements = _moneyMovements.any((m) =>
+        m.funding.any((a) => a.paymentId == paymentId));
 
-      // إذا كانت الدفعة قد استُخدمت في دفع نقدي آخر، فلا نحذف سجل الدفع
-      // المرتبط بالمصروف تلقائياً؛ يبقى السجل المالي كما هو ولا نُنشئ
-      // بيانات ناقصة أو أرصدة سالبة.
-
-      _rebuildLinkedExpenses();
-      // إعادة حساب الحالة: إذا بقي مبلغ غير مستلم يعود الإيراد معلقاً
-      if (income != null && income.remainingAmount > 0) {
-        income.status = 'pending';
-      }
-      _saveAll();
-      notifyListeners();
+    if (usedDirectlyByExpense ||
+        usedByExpensePayments ||
+        usedByZakatPayments ||
+        usedByMoneyMovements) {
+      throw Exception(
+        'لا يمكن حذف دفعة الإيراد لأنها مستخدمة في عملية مالية أخرى. '
+        'ألغِ أو عدّل العمليات المرتبطة بها أولاً.',
+      );
     }
+
+    _incomePayments.removeWhere((p) => p.id == paymentId);
+    _moneyMovements.removeWhere((m) => m.paymentId == paymentId);
+    final income = _incomes.firstWhereOrNull((i) => i.id == payment.incomeId);
+    income?.removePayment(paymentId);
+
+    _rebuildLinkedExpenses();
+    // إعادة حساب الحالة: إذا بقي مبلغ غير مستلم يعود الإيراد معلقاً.
+    if (income != null && income.remainingAmount > 0) {
+      income.status = 'pending';
+    }
+    _saveAll();
+    notifyListeners();
   }
 
   // --- Expense Payment CRUD ---
@@ -1937,7 +2165,13 @@ class FinanceProvider extends ChangeNotifier {
       throw Exception('يجب تحديد المحفظة عند تعديل دفعة إيراد');
     }
     final old = _incomePayments[idx];
-    final income = _incomes.firstWhereOrNull((i) => i.id == updated.incomeId);
+    if (updated.incomeId != old.incomeId) {
+      throw Exception('لا يمكن نقل دفعة الإيراد إلى إيراد آخر؛ أنشئ دفعة جديدة للإيراد الآخر');
+    }
+    final income = _incomes.firstWhereOrNull((i) => i.id == old.incomeId);
+    if (income == null) {
+      throw Exception('الإيراد المرتبط بدفعة الإيراد غير موجود');
+    }
 
     // لا يمكن تخفيض الدفعة عن المبلغ الملتزم به (تصريفات + مصروفات مرتبطة)
     final committed =
@@ -2007,6 +2241,36 @@ class FinanceProvider extends ChangeNotifier {
 
   // --- Partnership CRUD ---
 
+  void _validatePartnershipShareTotal(Partnership candidate, {String? excludeId}) {
+    final relevant = <Partnership>[
+      ..._partnerships.where((p) => p.id != excludeId && p.landPlotId == candidate.landPlotId),
+      candidate,
+    ];
+
+    // مجموع نسب الشراكات لا يجوز أن يتجاوز 100% في أي تاريخ.
+    // نتحقق عند نقاط تغيّر الحالة (البدايات والنهايات)، حيث لا يتغير
+    // مجموع الشراكات بين هذه النقاط.
+    final checkpoints = <DateTime>{};
+    for (final partnership in relevant) {
+      checkpoints.add(partnership.startDate);
+      if (partnership.endDate != null) {
+        checkpoints.add(partnership.endDate!);
+      }
+    }
+
+    for (final date in checkpoints) {
+      final total = relevant
+          .where((p) => p.isActiveAt(date))
+          .fold<double>(0, (sum, p) => sum + p.sharePercentage);
+      if (total > 100.000001) {
+        throw Exception(
+          'مجموع نسب الشراكات المتداخلة لا يمكن أن يتجاوز 100% '
+          '(الإجمالي الحالي $total%)',
+        );
+      }
+    }
+  }
+
   void addPartnership(Partnership p) {
     if (p.id.trim().isEmpty) throw Exception('معرّف الشراكة غير صالح');
     if (_partnerships.any((e) => e.id == p.id)) {
@@ -2029,6 +2293,7 @@ class FinanceProvider extends ChangeNotifier {
     if (p.endDate != null && p.endDate!.isBefore(p.startDate)) {
       throw Exception('تاريخ نهاية الشراكة لا يمكن أن يسبق تاريخ بدايتها');
     }
+    _validatePartnershipShareTotal(p);
     _partnerships.add(p);
     _syncDistributionsForPartnershipScope(p.landPlotId);
     _saveAll();
@@ -2055,6 +2320,7 @@ class FinanceProvider extends ChangeNotifier {
       throw Exception('تاريخ نهاية الشراكة لا يمكن أن يسبق تاريخ بدايتها');
     }
     if (idx != -1) {
+      _validatePartnershipShareTotal(updated, excludeId: updated.id);
       final oldPlotId = _partnerships[idx].landPlotId;
       _partnerships[idx] = updated;
       _syncDistributionsForPartnershipScope(updated.landPlotId);
@@ -2194,31 +2460,16 @@ class FinanceProvider extends ChangeNotifier {
   // --- Distribution CRUD ---
 
   void addDistribution(Distribution d) {
-    String? paidWalletId;
-    if (d.isPaid && !_moneyMovements.any((m) => m.distributionId == d.id)) {
-      final inc = _incomes.firstWhereOrNull((i) => i.id == d.incomeId);
-      final effectiveWalletId = inc?.walletId ??
-          defaultWallet()?.id ??
-          (_wallets.isNotEmpty ? _wallets.first.id : '');
-      if (effectiveWalletId.trim().isEmpty) {
-        throw Exception('لا يمكن تسجيل حصة شريك مسددة دون تحديد محفظة');
-      }
-      paidWalletId = effectiveWalletId;
+    // لا ننشئ حركة مالية تلقائيًا من حالة isPaid؛ فحالة السداد وحدها
+    // لا تحتوي على مصدر التمويل ولا تكفي لإعادة بناء الحركة الأصلية.
+    // يجب إنشاء السداد عبر markDistributionPaid() بعد تحديد التمويل والمحفظة.
+    if (d.isPaid) {
+      throw Exception(
+        'لا يمكن إضافة حصة شريك بحالة مسددة مباشرة؛ يجب تسجيل السداد مع مصدر التمويل',
+      );
     }
+
     _distributions.add(d);
-    if (d.isPaid && !_moneyMovements.any((m) => m.distributionId == d.id)) {
-      final inc = _incomes.firstWhereOrNull((i) => i.id == d.incomeId);
-      final effectiveWalletId = paidWalletId!;
-      _moneyMovements.add(MoneyMovement(
-        id: const Uuid().v4(),
-        walletId: effectiveWalletId,
-        amount: d.amount,
-        date: d.paidDate ?? inc?.date ?? DateTime.now(),
-        distributionId: d.id,
-        incomeId: inc?.id,
-        note: 'تسديد حصة شريك (تسوية استيراد)',
-      ));
-    }
     _saveRefData();
     notifyListeners();
   }
@@ -2253,17 +2504,27 @@ class FinanceProvider extends ChangeNotifier {
       if (funding.isEmpty) {
         throw Exception('غير مسموح بالاستقطاع المباشر من المحفظة دون تحديد دفعة إيراد نقدية');
       }
-      final total = funding.fold(0.0, (s, a) => s + a.amount);
-      if ((total - d.amount).abs() > 0.01) {
-        throw Exception(
-            'مجموع الاستقطاع يجب أن يساوي مبلغ الحصة (${d.amount.toStringAsFixed(2)} ر.ي)');
+      // سداد حصة الشريك يجب أن يكون ممولًا من دفعات إيراد؛ لا نسمح
+      // هنا بمصدر تمويل دين، لأن الحركة مرتبطة بحصة إيراد محددة.
+      if (funding.any((a) => a.paymentId == null || a.debtSettlementId != null)) {
+        throw Exception('تمويل حصة الشريك يجب أن يأتي من دفعات الإيراد فقط');
       }
-      validateFunding(funding);
       final firstPayment = _incomePayments
           .firstWhereOrNull((p) => p.id == funding.first.paymentId);
       final income = firstPayment != null
           ? _incomes.firstWhereOrNull((i) => i.id == firstPayment.incomeId)
           : null;
+      final distributionCurrency = income?.currency ?? baseCurrencyCode;
+      if (funding.any((a) => a.currency != distributionCurrency)) {
+        throw Exception(
+            'عملة تمويل الحصة يجب أن تطابق عملة الإيراد المرتبط بالحصة ($distributionCurrency)');
+      }
+      final total = funding.fold(0.0, (s, a) => s + a.amount);
+      if ((total - d.amount).abs() > 0.01) {
+        throw Exception(
+            'مجموع الاستقطاع يجب أن يساوي مبلغ الحصة (${d.amount.toStringAsFixed(2)} $distributionCurrency)');
+      }
+      validateFunding(funding);
       final effectiveWalletId = income?.walletId ??
           walletId ??
           defaultWallet()?.id ??
@@ -2282,6 +2543,8 @@ class FinanceProvider extends ChangeNotifier {
         incomeId: income?.id,
         note: 'تسديد حصة شريك',
         funding: funding,
+        currency: distributionCurrency,
+        exchangeRate: income?.exchangeRate ?? 1.0,
       ));
       _saveAll();
       notifyListeners();
@@ -2350,12 +2613,29 @@ class FinanceProvider extends ChangeNotifier {
   /// استقطاع من دفعة إيراد محددة
   List<ExpenseAllocation> allocateFromSpecificIncomePayment(
       String paymentId, double requiredAmount) {
+    if (requiredAmount <= 0) {
+      throw Exception('مبلغ الاستقطاع يجب أن يكون أكبر من صفر');
+    }
+
+    final payment =
+        _incomePayments.firstWhereOrNull((p) => p.id == paymentId);
+    if (payment == null) {
+      throw Exception('دفعة الإيراد المحددة غير موجودة');
+    }
+
     final avail = paymentAvailable(paymentId);
-    final take = requiredAmount < avail ? requiredAmount : avail;
-    if (take <= 0.001) return [];
-    final payment = _incomePayments.firstWhereOrNull((p) => p.id == paymentId);
-    if (payment == null) return [];
-    final rounded = double.parse(take.toStringAsFixed(2));
+    if (requiredAmount > avail + 0.001) {
+      throw Exception(
+        'المبلغ المطلوب يتجاوز المتاح في دفعة الإيراد '
+        '(${avail.toStringAsFixed(2)} ${payment.currency})',
+      );
+    }
+
+    final rounded = double.parse(requiredAmount.toStringAsFixed(2));
+    if (rounded <= 0) {
+      throw Exception('مبلغ الاستقطاع غير صالح');
+    }
+
     return [
       ExpenseAllocation(
         incomeId: payment.incomeId,
@@ -2428,7 +2708,7 @@ class FinanceProvider extends ChangeNotifier {
     return sources..sort((a, b) => b.date.compareTo(a.date));
   }
 
-  double debtFundingAvailable(String sourceId, {String? excludeExpenseId}) {
+  double debtFundingAvailable(String sourceId, {String? excludeExpenseId, String? excludeMovementId}) {
     final source = debtFundingSources.firstWhereOrNull((s) => s.id == sourceId);
     if (source == null) return 0;
     var used = 0.0;
@@ -2444,6 +2724,7 @@ class FinanceProvider extends ChangeNotifier {
           .fold(0.0, (sum, a) => sum + a.amount);
     }
     for (final movement in _moneyMovements) {
+      if (movement.id == excludeMovementId) continue;
       used += movement.funding
           .where((a) => a.debtSettlementId == sourceId)
           .fold(0.0, (sum, a) => sum + a.amount);
@@ -2496,12 +2777,29 @@ class FinanceProvider extends ChangeNotifier {
 
   List<ExpenseAllocation> allocateFromSpecificDebtFundingSource(
       String sourceId, double requiredAmount) {
+    if (requiredAmount <= 0) {
+      throw Exception('مبلغ الاستقطاع يجب أن يكون أكبر من صفر');
+    }
+
+    final source =
+        debtFundingSources.firstWhereOrNull((s) => s.id == sourceId);
+    if (source == null) {
+      throw Exception('مصدر تمويل الدين المحدد غير موجود');
+    }
+
     final avail = debtFundingAvailable(sourceId);
-    final take = requiredAmount < avail ? requiredAmount : avail;
-    if (take <= 0.001) return [];
-    final source = debtFundingSources.firstWhereOrNull((s) => s.id == sourceId);
-    if (source == null) return [];
-    final rounded = double.parse(take.toStringAsFixed(2));
+    if (requiredAmount > avail + 0.001) {
+      throw Exception(
+        'المبلغ المطلوب يتجاوز المتاح من دفعة الدين '
+        '(${avail.toStringAsFixed(2)} ${source.currency})',
+      );
+    }
+
+    final rounded = double.parse(requiredAmount.toStringAsFixed(2));
+    if (rounded <= 0) {
+      throw Exception('مبلغ الاستقطاع غير صالح');
+    }
+
     return [
       ExpenseAllocation(
         incomeId: '',
@@ -2566,11 +2864,26 @@ class FinanceProvider extends ChangeNotifier {
 
     if (unpaid.isEmpty) return;
 
+    final distributionCurrencies = <String>{};
+    for (final d in unpaid) {
+      final income = _incomes.firstWhereOrNull((i) => i.id == d.incomeId);
+      distributionCurrencies.add(income?.currency ?? baseCurrencyCode);
+    }
+    if (distributionCurrencies.length > 1) {
+      throw Exception(
+          'لا يمكن تنفيذ سداد مجمع لحصص بعملات مختلفة؛ نفّذ السداد لكل عملة بشكل مستقل');
+    }
+    final distributionCurrency =
+        distributionCurrencies.isEmpty ? baseCurrencyCode : distributionCurrencies.first;
+    if (funding.any((a) => a.currency != distributionCurrency)) {
+      throw Exception(
+          'عملة التمويل يجب أن تطابق عملة الحصص المستحقة ($distributionCurrency)');
+    }
     final totalUnpaid = unpaid.fold(0.0, (s, d) => s + d.amount);
     final totalFunding = funding.fold(0.0, (s, a) => s + a.amount);
     if ((totalFunding - totalUnpaid).abs() > 0.01) {
       throw Exception(
-          'مجموع التمويل (${totalFunding.toStringAsFixed(2)} ر.ي) يجب أن يغطي إجمالي المستحقات (${totalUnpaid.toStringAsFixed(2)} ر.ي)');
+          'مجموع التمويل (${totalFunding.toStringAsFixed(2)} $distributionCurrency) يجب أن يساوي إجمالي المستحقات (${totalUnpaid.toStringAsFixed(2)} $distributionCurrency)');
     }
     validateFunding(funding);
 
@@ -2638,7 +2951,59 @@ class FinanceProvider extends ChangeNotifier {
         defaultWallet()?.id ??
         (_wallets.isNotEmpty ? _wallets.first.id : '');
 
+    if (effectiveWalletId.trim().isEmpty) {
+      throw Exception('لا توجد محفظة صالحة لتسجيل سداد أجور العمال');
+    }
+
     final effectiveSource = fundingSource;
+    if (effectiveSource != 'income' && effectiveSource != 'debt_settlement') {
+      throw Exception('مصدر تمويل أجور العمال غير صالح');
+    }
+
+    // نتحقق من كامل العملية قبل إجراء أي تعديل على القوائم.
+    // هذا يمنع بقاء بعض أجور العمال مسددة إذا فشل تمويل عامل لاحق.
+    final totalRequested = workerPayouts
+        .where((wp) => wp.amount > 0.001)
+        .fold<double>(0, (sum, wp) => sum + wp.amount);
+    if (totalRequested <= 0.001) {
+      throw Exception('يجب إدخال مبلغ سداد صالح لأجر عامل واحد على الأقل');
+    }
+
+    if (effectiveSource == 'income') {
+      if (specificIncomePaymentId == null ||
+          specificIncomePaymentId.trim().isEmpty) {
+        throw Exception('يجب اختيار دفعة إيراد محددة لتمويل سداد الأجور');
+      }
+      final payment = _incomePayments
+          .firstWhereOrNull((p) => p.id == specificIncomePaymentId);
+      if (payment == null) {
+        throw Exception('دفعة الإيراد المحددة لتمويل الأجور غير موجودة');
+      }
+      final available = paymentAvailable(payment.id);
+      if (totalRequested > available + 0.001) {
+        throw Exception(
+          'إجمالي سداد أجور العمال (${totalRequested.toStringAsFixed(2)}) '
+          'يتجاوز المتاح في دفعة الإيراد (${available.toStringAsFixed(2)} ${payment.currency})',
+        );
+      }
+    } else {
+      if (specificDebtSettlementId == null ||
+          specificDebtSettlementId.trim().isEmpty) {
+        throw Exception('يجب اختيار دفعة استلام محددة لتمويل سداد الأجور');
+      }
+      final source = debtFundingSources
+          .firstWhereOrNull((s) => s.id == specificDebtSettlementId);
+      if (source == null) {
+        throw Exception('مصدر تمويل الدين المحدد لسداد الأجور غير موجود');
+      }
+      final available = debtFundingAvailable(source.id);
+      if (totalRequested > available + 0.001) {
+        throw Exception(
+          'إجمالي سداد أجور العمال (${totalRequested.toStringAsFixed(2)}) '
+          'يتجاوز المتاح من دفعة الدين (${available.toStringAsFixed(2)} ${source.currency})',
+        );
+      }
+    }
 
     for (final wp in workerPayouts) {
       if (wp.amount <= 0.001) continue;
@@ -2919,13 +3284,18 @@ class FinanceProvider extends ChangeNotifier {
       throw Exception('لا يمكن أن يتجاوز مجموع مدفوعات الزكاة المستحق');
     }
     final effectiveFunding = funding ?? updated.funding;
+    final existingZakatMovement =
+        _moneyMovements.firstWhereOrNull((m) => m.zakatPaymentId == updated.id);
     if (effectiveFunding.isNotEmpty) {
       final sumFunding = effectiveFunding.fold(0.0, (s, a) => s + a.amount);
       if ((sumFunding - updated.amount).abs() > 0.01) {
         throw Exception(
             'مجموع التمويل يجب أن يساوي مبلغ الدفعة (${updated.amount.toStringAsFixed(2)} ر.ي)');
       }
-      validateFunding(effectiveFunding);
+      validateFunding(
+        effectiveFunding,
+        excludeMovementId: existingZakatMovement?.id,
+      );
     }
     _zakatPayments[idx] = ZakatPayment(
       id: updated.id,
@@ -3028,7 +3398,12 @@ class FinanceProvider extends ChangeNotifier {
     if (idx != -1) {
       final rec = _workRecords[idx];
       if (rec.incomeId != null) {
-        deleteIncome(rec.incomeId!);
+        try {
+          final deleted = deleteIncome(rec.incomeId!);
+          if (!deleted) return;
+        } catch (_) {
+          return;
+        }
       }
       _workRecords.removeAt(idx);
       _saveRefData();
@@ -3137,18 +3512,26 @@ class FinanceProvider extends ChangeNotifier {
   // --- Wallet CRUD ---
 
   void addWallet(Wallet wallet) {
+    if (wallet.id.trim().isEmpty) {
+      throw Exception('معرف المحفظة غير صالح');
+    }
+    if (_wallets.any((w) => w.id == wallet.id)) {
+      throw Exception('لا يمكن إضافة محفظة بنفس المعرف الموجود مسبقاً');
+    }
     _wallets.add(wallet);
     _saveRefData();
     notifyListeners();
   }
 
   void updateWallet(Wallet updated) {
-    final idx = _wallets.indexWhere((e) => e.id == updated.id);
-    if (idx != -1) {
-      _wallets[idx] = updated;
-      _saveRefData();
-      notifyListeners();
+    if (updated.id.trim().isEmpty) {
+      throw Exception('معرف المحفظة غير صالح');
     }
+    final idx = _wallets.indexWhere((e) => e.id == updated.id);
+    if (idx == -1) return;
+    _wallets[idx] = updated;
+    _saveRefData();
+    notifyListeners();
   }
 
   bool deleteWallet(String id) {
@@ -3273,11 +3656,23 @@ class FinanceProvider extends ChangeNotifier {
   // --- MoneyMovement (تصريف/سحب) CRUD ---
 
   void addMoneyMovement(MoneyMovement m) {
+    if (m.id.trim().isEmpty) {
+      throw Exception('معرف الحركة المالية غير صالح');
+    }
+    if (_moneyMovements.any((existing) => existing.id == m.id)) {
+      throw Exception('لا يمكن إضافة حركة مالية بنفس المعرف الموجود مسبقاً');
+    }
     if (m.walletId.trim().isEmpty) {
       throw Exception('يجب تحديد المحفظة للحركة المالية');
     }
-    if (m.amount.abs() < 0.000001) {
-      throw Exception('لا يمكن تسجيل حركة مالية بقيمة صفر');
+    if (!_wallets.any((w) => w.id == m.walletId)) {
+      throw Exception('المحفظة المحددة للحركة المالية غير موجودة');
+    }
+    if (m.amount.isNaN || m.amount.isInfinite || m.amount.abs() < 0.000001) {
+      throw Exception('قيمة الحركة المالية غير صالحة');
+    }
+    if (m.funding.isNotEmpty) {
+      validateFunding(m.funding);
     }
     _moneyMovements.add(m);
     _saveRefData();
@@ -3285,18 +3680,42 @@ class FinanceProvider extends ChangeNotifier {
   }
 
   void updateMoneyMovement(MoneyMovement updated) {
+    if (updated.id.trim().isEmpty) {
+      throw Exception('معرف الحركة المالية غير صالح');
+    }
     if (updated.walletId.trim().isEmpty) {
       throw Exception('يجب تحديد المحفظة للحركة المالية');
     }
-    if (updated.amount.abs() < 0.000001) {
-      throw Exception('لا يمكن تسجيل حركة مالية بقيمة صفر');
+    if (!_wallets.any((w) => w.id == updated.walletId)) {
+      throw Exception('المحفظة المحددة للحركة المالية غير موجودة');
+    }
+    if (updated.amount.isNaN || updated.amount.isInfinite ||
+        updated.amount.abs() < 0.000001) {
+      throw Exception('قيمة الحركة المالية غير صالحة');
     }
     final idx = _moneyMovements.indexWhere((e) => e.id == updated.id);
-    if (idx != -1) {
-      _moneyMovements[idx] = updated;
-      _saveRefData();
-      notifyListeners();
+    if (idx == -1) return;
+
+    final current = _moneyMovements[idx];
+    final linkageChanged = current.incomeId != updated.incomeId ||
+        current.paymentId != updated.paymentId ||
+        current.distributionId != updated.distributionId ||
+        current.purchaseId != updated.purchaseId ||
+        current.zakatPaymentId != updated.zakatPaymentId ||
+        current.debtId != updated.debtId ||
+        current.debtSettlementId != updated.debtSettlementId ||
+        current.creditorId != updated.creditorId ||
+        current.creditorType != updated.creditorType;
+    if (linkageChanged) {
+      throw Exception('لا يمكن تغيير مرجع العملية الأصلية للحركة المالية من هنا');
     }
+
+    if (updated.funding.isNotEmpty) {
+      validateFunding(updated.funding, excludeMovementId: current.id);
+    }
+    _moneyMovements[idx] = updated;
+    _saveRefData();
+    notifyListeners();
   }
 
   bool deleteMoneyMovement(String id) {
@@ -3367,9 +3786,18 @@ class FinanceProvider extends ChangeNotifier {
     return true;
   }
 
-  double disbursedForPayment(String paymentId) => _moneyMovements
-      .where((m) => m.paymentId == paymentId)
-      .fold(0.0, (s, m) => s + m.amount);
+  /// مجموع الحركات المباشرة المرتبطة بدفعة إيراد.
+  ///
+  /// إذا كانت الحركة تحتوي أيضًا على [funding] فإن مبلغها يُحتسب من خلال
+  /// [fundedForPayment]، لذلك لا نحتسبها هنا مرة أخرى حتى لا يحدث خصم مزدوج
+  /// من الرصيد المتاح للدفعة.
+  double disbursedForPayment(String paymentId, {String? excludeMovementId}) =>
+      _moneyMovements
+          .where((m) =>
+              m.paymentId == paymentId &&
+              m.id != excludeMovementId &&
+              m.funding.isEmpty)
+          .fold(0.0, (s, m) => s + m.amount);
 
   double disbursedForIncome(String incomeId) {
     final income = _incomes.firstWhereOrNull((i) => i.id == incomeId);
@@ -3606,6 +4034,28 @@ class FinanceProvider extends ChangeNotifier {
         _personalDebts.any((d) => d.id == debt.id)) {
       return false;
     }
+
+    // الدين الذي نسجله كـ "يدين لنا" هو صرف فعلي، لذلك يجب أن يكون
+    // تمويله مكتملًا وصحيحًا قبل إنشاء الحركة النقدية. أما "ندين له"
+    // فهو دخول نقدي ولا يحتاج إلى تمويل.
+    if (debt.direction != 'receivable' && debt.direction != 'payable') {
+      return false;
+    }
+
+    if (debt.direction == 'receivable' && debt.walletId != null) {
+      final sumFunding = debt.funding.fold<double>(0, (s, a) => s + a.amount);
+      if ((sumFunding - debt.amount).abs() > 0.01) {
+        return false;
+      }
+      try {
+        validateFunding(debt.funding);
+      } catch (_) {
+        return false;
+      }
+    } else if (debt.funding.isNotEmpty) {
+      return false;
+    }
+
     _personalDebts.add(debt);
     if (debt.walletId != null && debt.walletId!.isNotEmpty) {
       if (debt.direction == 'receivable') {
@@ -3644,13 +4094,51 @@ class FinanceProvider extends ChangeNotifier {
     return true;
   }
 
+  bool _sameDebtFunding(List<ExpenseAllocation> a, List<ExpenseAllocation> b) {
+    if (a.length != b.length) return false;
+    final left = a.map((x) => <String, Object?>{
+      'incomeId': x.incomeId,
+      'paymentId': x.paymentId,
+      'debtSettlementId': x.debtSettlementId,
+      'debtId': x.debtId,
+      'amount': x.amount,
+      'currency': x.currency,
+    }).toList()
+      ..sort((x, y) => '${x['paymentId'] ?? ''}|${x['debtSettlementId'] ?? ''}|${x['incomeId'] ?? ''}'
+          .compareTo('${y['paymentId'] ?? ''}|${y['debtSettlementId'] ?? ''}|${y['incomeId'] ?? ''}'));
+    final right = b.map((x) => <String, Object?>{
+      'incomeId': x.incomeId,
+      'paymentId': x.paymentId,
+      'debtSettlementId': x.debtSettlementId,
+      'debtId': x.debtId,
+      'amount': x.amount,
+      'currency': x.currency,
+    }).toList()
+      ..sort((x, y) => '${x['paymentId'] ?? ''}|${x['debtSettlementId'] ?? ''}|${x['incomeId'] ?? ''}'
+          .compareTo('${y['paymentId'] ?? ''}|${y['debtSettlementId'] ?? ''}|${y['incomeId'] ?? ''}'));
+    for (var i = 0; i < left.length; i++) {
+      if (left[i]['incomeId'] != right[i]['incomeId'] ||
+          left[i]['paymentId'] != right[i]['paymentId'] ||
+          left[i]['debtSettlementId'] != right[i]['debtSettlementId'] ||
+          left[i]['debtId'] != right[i]['debtId'] ||
+          ((left[i]['amount'] as double) - (right[i]['amount'] as double)).abs() >
+              0.000001 ||
+          left[i]['currency'] != right[i]['currency']) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   bool updatePersonalDebt(PersonalDebt updated) {
     final idx = _personalDebts.indexWhere((e) => e.id == updated.id);
     if (idx == -1) return false;
     if (updated.amount <= 0 || updated.personId.trim().isEmpty) return false;
+    if (updated.direction != 'receivable' && updated.direction != 'payable') return false;
     if (updated.walletId != null && updated.walletId!.trim().isEmpty) return false;
 
     final current = _personalDebts[idx];
+
     final settlements = _personalDebtSettlements
         .where((s) => s.debtId == updated.id)
         .toList();
@@ -3659,13 +4147,14 @@ class FinanceProvider extends ChangeNotifier {
     // بعد تسجيل تسويات لا نسمح بتغيير أصل الدين إلى قيمة أقل من المدفوع.
     if (updated.amount < paid) return false;
 
-    // تغيير المحفظة/الاتجاه/المبلغ بعد إنشاء تسويات قد يكسر الربط التاريخي.
-    // لذلك نسمح بتغيير بيانات الدين غير المالية فقط إذا كانت له تسويات.
+    // بعد وجود تسويات، لا نسمح بتغيير أي جزء من هوية الحركة المالية
+    // الأصلية أو تمويلها؛ لأن ذلك يغيّر التاريخ المالي للدين بعد تسجيل السداد.
     if (settlements.isNotEmpty &&
         (updated.direction != current.direction ||
             updated.walletId != current.walletId ||
             (updated.amount - current.amount).abs() > 0.000001 ||
-            updated.date != current.date)) {
+            updated.date != current.date ||
+            !_sameDebtFunding(updated.funding, current.funding))) {
       return false;
     }
 
@@ -3674,6 +4163,23 @@ class FinanceProvider extends ChangeNotifier {
     if (settlements.isEmpty) {
       final movement = _moneyMovements.firstWhereOrNull((m) =>
           m.debtId == current.id && m.debtSettlementId == null);
+
+      if (updated.direction == 'receivable' && updated.walletId != null) {
+        final sumFunding =
+            updated.funding.fold<double>(0, (s, a) => s + a.amount);
+        if ((sumFunding - updated.amount).abs() > 0.01) return false;
+        try {
+          validateFunding(
+            updated.funding,
+            excludeMovementId: movement?.id,
+          );
+        } catch (_) {
+          return false;
+        }
+      } else if (updated.funding.isNotEmpty) {
+        return false;
+      }
+
       if (updated.walletId != null && updated.walletId!.isNotEmpty) {
         final expectedAmount = updated.direction == 'receivable'
             ? updated.amount.abs()
@@ -3683,7 +4189,8 @@ class FinanceProvider extends ChangeNotifier {
             ..walletId = updated.walletId!
             ..amount = expectedAmount
             ..date = updated.date
-            ..funding = updated.funding;
+            ..funding = updated.direction == 'receivable' ? updated.funding : const []
+            ..note = updated.note ?? movement.note;
         } else {
           final person = partners.firstWhereOrNull((p) => p.id == updated.personId);
           final personName = person?.name ?? '';
@@ -3712,16 +4219,38 @@ class FinanceProvider extends ChangeNotifier {
   }
 
   bool deletePersonalDebt(String id) {
+    final debt = _personalDebts.firstWhereOrNull((d) => d.id == id);
+    if (debt == null) return false;
+
     final settlementIds = _personalDebtSettlements
         .where((s) => s.debtId == id)
-        .map((s) => s.id);
-    final hasFundingReferences =
-      settlementIds.any(_debtFundingSourceIsUsed) ||
-      _debtFundingSourceIsUsed('debt_borrow_$id') ||
-        _expenses.any((e) => e.personId == id && e.paymentMethod == 'debt');
-    if (hasFundingReferences) return false;
+        .map((s) => s.id)
+        .toSet();
+
+    // لا نحذف الدين إذا كانت إحدى تسوياته مستخدمة كمصدر تمويل خارجي،
+    // أو إذا كان الدين نفسه (القرض المستلم) مستخدمًا كمصدر تمويل.
+    final hasSettlementFundingReferences =
+        settlementIds.any(_debtFundingSourceIsUsed);
+    final hasBorrowFundingReferences =
+        debt.direction == 'payable' &&
+        _debtFundingSourceIsUsed('debt_borrow_$id');
+
+    // الدين الناتج تلقائيًا عن مصروف آجل مرتبط بالمصروف نفسه، لذلك يجب
+    // التحقق من رابط expenseId الحقيقي بدل مقارنة personId بمعرف الدين.
+    final linkedDebtExpense = _expenses.any(
+      (e) => e.id == debt.expenseId && e.paymentMethod == 'debt',
+    );
+
+    if (hasSettlementFundingReferences ||
+        hasBorrowFundingReferences ||
+        linkedDebtExpense) {
+      return false;
+    }
+
+    // الحركات المرتبطة بالدين نفسه ليست مراجع خارجية؛ وهي جزء من سجل
+    // الدين، لذلك تُحذف معه حتى لا يبقى أثر مالي يتيم في المحفظة.
+    _personalDebtSettlements.removeWhere((s) => settlementIds.contains(s.id));
     _personalDebts.removeWhere((e) => e.id == id);
-    _personalDebtSettlements.removeWhere((s) => s.debtId == id);
     _moneyMovements.removeWhere((m) => m.debtId == id);
     _saveRefData();
     notifyListeners();
@@ -3750,6 +4279,24 @@ class FinanceProvider extends ChangeNotifier {
     if (debt == null || settlement.amount <= 0 || settlement.walletId.trim().isEmpty) {
       return false;
     }
+
+    // تسوية دين قابل للدفع هي حركة صرف فعلية، لذلك يجب أن يساوي مجموع
+    // التمويل مبلغ التسوية وأن يمر عبر نفس قواعد التحقق المستخدمة لبقية العمليات.
+    if (debt.direction == 'payable') {
+      final sumFunding =
+          settlement.funding.fold<double>(0, (s, a) => s + a.amount);
+      if ((sumFunding - settlement.amount).abs() > 0.01) {
+        return false;
+      }
+      try {
+        validateFunding(settlement.funding);
+      } catch (_) {
+        return false;
+      }
+    } else if (settlement.funding.isNotEmpty) {
+      return false;
+    }
+
     final remaining = personalDebtRemaining(debt.id);
     if (settlement.amount > remaining + 0.000001) return false;
 
@@ -4128,7 +4675,8 @@ class FinanceProvider extends ChangeNotifier {
     final inWarehouses = _storageItems
         .where((s) =>
             s.productId == productId ||
-            s.name.trim().toLowerCase() == product.name.trim().toLowerCase())
+            ((s.productId == null || s.productId!.trim().isEmpty) &&
+                s.name.trim().toLowerCase() == product.name.trim().toLowerCase()))
         .fold(0.0, (sum, s) => sum + s.quantity);
     final undistributed = undistributedStockForProduct(productId);
     return (inWarehouses + undistributed).clamp(0.0, double.infinity);
@@ -4141,7 +4689,8 @@ class FinanceProvider extends ChangeNotifier {
     return _storageItems
         .where((s) =>
             s.productId == productId ||
-            s.name.trim().toLowerCase() == product.name.trim().toLowerCase())
+            ((s.productId == null || s.productId!.trim().isEmpty) &&
+                s.name.trim().toLowerCase() == product.name.trim().toLowerCase()))
         .fold(0.0, (sum, s) => sum + s.quantity);
   }
 
@@ -4214,9 +4763,17 @@ class FinanceProvider extends ChangeNotifier {
     if (purchase.paidAmount > 0 && (paymentWalletId == null || paymentWalletId.isEmpty)) {
       throw Exception('يجب تحديد المحفظة عند تسجيل فاتورة مدفوعة');
     }
+    if (purchase.paidAmount > 0 &&
+        !_wallets.any((w) => w.id == paymentWalletId)) {
+      throw Exception('المحفظة المحددة لدفع فاتورة الشراء غير موجودة');
+    }
     final effectiveFunding = funding ?? const <ExpenseAllocation>[];
     if (purchase.paidAmount > 0) {
       final sumFunding = effectiveFunding.fold(0.0, (s, a) => s + a.amount);
+      if (!sumFunding.isFinite ||
+          effectiveFunding.any((a) => !a.amount.isFinite || a.amount <= 0)) {
+        throw Exception('بيانات تمويل فاتورة الشراء غير صحيحة');
+      }
       if ((sumFunding - purchase.paidAmount).abs() > 0.01) {
         throw Exception('مجموع التمويل يجب أن يساوي مبلغ الدفعة المدفوعة');
       }
@@ -4234,21 +4791,7 @@ class FinanceProvider extends ChangeNotifier {
         quantity: quantity,
         unitPrice: unitPrice,
       ));
-      final idx = _products.indexWhere((e) => e.id == productId);
-      if (idx != -1) {
-        final p = _products[idx];
-        _products[idx] = Product(
-          id: p.id,
-          name: p.name,
-          category: p.category,
-          unit: p.unit,
-          purchasePrice: p.purchasePrice,
-          salePrice: p.salePrice,
-          currentStock: p.currentStock + quantity,
-          minStock: p.minStock,
-            maxPurchasePrice: p.maxPurchasePrice,
-        );
-      }
+      // currentStock سيُعاد بناؤه من حركات المخزون الفعلية بعد اكتمال التعديل.
     }
     if (purchase.paidAmount > 0) {
       _moneyMovements.add(MoneyMovement(
@@ -4279,11 +4822,11 @@ class FinanceProvider extends ChangeNotifier {
     final remaining = purchase.remainingAmount;
     if (remaining <= 0 && discount <= 0) return;
 
-    if (amount < 0) {
-      throw Exception('مبلغ دفعة الشراء لا يمكن أن يكون سالباً');
+    if (!amount.isFinite || amount < 0) {
+      throw Exception('مبلغ دفعة الشراء غير صالح');
     }
-    if (discount < 0) {
-      throw Exception('قيمة الخصم لا يمكن أن تكون سالبة');
+    if (!discount.isFinite || discount < 0) {
+      throw Exception('قيمة الخصم غير صالحة');
     }
     if (discount > remaining + 0.001) {
       throw Exception('قيمة الخصم تتجاوز المبلغ المتبقي من الفاتورة');
@@ -4302,8 +4845,15 @@ class FinanceProvider extends ChangeNotifier {
       throw Exception('لا يمكن تسجيل تمويل بدون دفعة شراء');
     }
     if (paid > 0 && walletId != null) {
+      if (!_wallets.any((w) => w.id == walletId)) {
+        throw Exception('المحفظة المحددة لدفعة الشراء غير موجودة');
+      }
       final effectiveFunding = funding ?? const <ExpenseAllocation>[];
       final sumFunding = effectiveFunding.fold(0.0, (s, a) => s + a.amount);
+      if (!sumFunding.isFinite ||
+          effectiveFunding.any((a) => !a.amount.isFinite || a.amount <= 0)) {
+        throw Exception('بيانات تمويل دفعة الشراء غير صحيحة');
+      }
       if ((sumFunding - paid).abs() > 0.01) {
         throw Exception('مجموع التمويل يجب أن يساوي مبلغ الدفعة ($paid ر.ي)');
       }
@@ -4343,6 +4893,10 @@ class FinanceProvider extends ChangeNotifier {
   }
 
   bool deletePurchase(String id) {
+    if (!_purchases.any((p) => p.id == id)) {
+      return false;
+    }
+
     final removedItems =
         _purchaseItems.where((e) => e.purchaseId == id).toList();
     final itemIds = removedItems.map((e) => e.id).toSet();
@@ -4353,23 +4907,10 @@ class FinanceProvider extends ChangeNotifier {
     _purchases.removeWhere((e) => e.id == id);
     _purchaseItems.removeWhere((e) => e.purchaseId == id);
     _moneyMovements.removeWhere((m) => m.purchaseId == id);
-    for (final item in removedItems) {
-      final idx = _products.indexWhere((e) => e.id == item.productId);
-      if (idx != -1) {
-        final p = _products[idx];
-        _products[idx] = Product(
-          id: p.id,
-          name: p.name,
-          category: p.category,
-          unit: p.unit,
-          purchasePrice: p.purchasePrice,
-          salePrice: p.salePrice,
-          currentStock: (p.currentStock - item.quantity).toDouble(),
-          minStock: p.minStock,
-            maxPurchasePrice: p.maxPurchasePrice,
-        );
-      }
-    }
+
+    // currentStock قيمة مشتقة من حركات المخزون الفعلية، لذلك لا نعدلها
+    // يدويًا عند حذف الفاتورة حتى لا يحدث خصم مزدوج من مخزون المنتج.
+    _reconcileInventoryAndPurchases();
     _products.sort((a, b) => a.name.compareTo(b.name));
     _saveAll();
     notifyListeners();
@@ -4386,6 +4927,12 @@ class FinanceProvider extends ChangeNotifier {
     if (purchase.paidAmount > 0 && (paymentWalletId == null || paymentWalletId.isEmpty)) {
       throw Exception('يجب تحديد المحفظة عند تسجيل فاتورة مدفوعة');
     }
+    if (purchase.paidAmount > 0 &&
+        !_wallets.any((w) => w.id == paymentWalletId)) {
+      throw Exception('المحفظة المحددة لدفع فاتورة الشراء غير موجودة');
+    }
+    final oldPurchaseMovement =
+        _moneyMovements.firstWhereOrNull((m) => m.purchaseId == oldId);
     final removedItems =
         _purchaseItems.where((e) => e.purchaseId == oldId).toList();
     final removedItemIds = removedItems.map((e) => e.id).toSet();
@@ -4398,27 +4945,13 @@ class FinanceProvider extends ChangeNotifier {
       if ((sumFunding - purchase.paidAmount).abs() > 0.01) {
         throw Exception('مجموع التمويل يجب أن يساوي مبلغ الدفعة المدفوعة');
       }
-      validateFunding(effectiveFunding);
+      validateFunding(
+        effectiveFunding,
+        excludeMovementId: oldPurchaseMovement?.id,
+      );
     }
     _purchaseItems.removeWhere((e) => e.purchaseId == oldId);
     _moneyMovements.removeWhere((m) => m.purchaseId == oldId);
-    for (final item in removedItems) {
-      final idx = _products.indexWhere((e) => e.id == item.productId);
-      if (idx != -1) {
-        final p = _products[idx];
-        _products[idx] = Product(
-          id: p.id,
-          name: p.name,
-          category: p.category,
-          unit: p.unit,
-          purchasePrice: p.purchasePrice,
-          salePrice: p.salePrice,
-          currentStock: (p.currentStock - item.quantity).toDouble(),
-          minStock: p.minStock,
-            maxPurchasePrice: p.maxPurchasePrice,
-        );
-      }
-    }
 
     final pIdx = _purchases.indexWhere((e) => e.id == purchase.id);
     if (pIdx != -1) {
@@ -4438,21 +4971,6 @@ class FinanceProvider extends ChangeNotifier {
         quantity: quantity,
         unitPrice: unitPrice,
       ));
-      final idx = _products.indexWhere((e) => e.id == productId);
-      if (idx != -1) {
-        final p = _products[idx];
-        _products[idx] = Product(
-          id: p.id,
-          name: p.name,
-          category: p.category,
-          unit: p.unit,
-          purchasePrice: p.purchasePrice,
-          salePrice: p.salePrice,
-          currentStock: p.currentStock + quantity,
-          minStock: p.minStock,
-            maxPurchasePrice: p.maxPurchasePrice,
-        );
-      }
     }
 
     if (purchase.paidAmount > 0) {
@@ -4467,6 +4985,7 @@ class FinanceProvider extends ChangeNotifier {
       ));
     }
 
+    _reconcileInventoryAndPurchases();
     _products.sort((a, b) => a.name.compareTo(b.name));
     _purchases.sort((a, b) => b.date.compareTo(a.date));
     _saveAll();
@@ -4545,7 +5064,8 @@ class FinanceProvider extends ChangeNotifier {
       var storageItem = _storageItems.firstWhereOrNull((s) =>
           s.warehouseId == warehouseId &&
           ((product?.id != null && s.productId == product!.id) ||
-              s.name.trim() == (product?.name ?? '').trim()));
+              ((s.productId == null || s.productId!.trim().isEmpty) &&
+                  s.name.trim() == (product?.name ?? '').trim())));
 
       if (storageItem == null) {
         storageItem = StorageItem(

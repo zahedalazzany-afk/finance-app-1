@@ -1785,11 +1785,18 @@ class _IncomesScreenState extends State<IncomesScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () {
-              provider.deleteIncome(income.id);
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('تم حذف الإيراد بنجاح')),
-              );
+              try {
+                final deleted = provider.deleteIncome(income.id);
+                if (!deleted) return;
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('تم حذف الإيراد بنجاح')),
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+                );
+              }
             },
             child: const Text('حذف'),
           ),

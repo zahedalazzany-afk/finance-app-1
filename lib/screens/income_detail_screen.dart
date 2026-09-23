@@ -1534,8 +1534,15 @@ class _IncomeDetailScreenState extends State<IncomeDetailScreen> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
           TextButton(
             onPressed: () {
-              provider.deleteIncomePayment(paymentId);
-              Navigator.pop(context);
+              try {
+                provider.deleteIncomePayment(paymentId);
+                Navigator.pop(context);
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+                );
+              }
             },
             child: Text('حذف', style: TextStyle(color: AppTheme.expenseRed)),
           ),
@@ -1900,9 +1907,16 @@ class _IncomeDetailScreenState extends State<IncomeDetailScreen> {
               child: const Text('إلغاء')),
           TextButton(
             onPressed: () {
-              provider.deleteIncome(income.id);
-              Navigator.pop(context);
-              Navigator.pop(context);
+              try {
+                final deleted = provider.deleteIncome(income.id);
+                if (!deleted) return;
+                Navigator.pop(context);
+                Navigator.pop(context);
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+                );
+              }
             },
             child: Text('حذف',
                 style: TextStyle(color: AppTheme.expenseRed)),

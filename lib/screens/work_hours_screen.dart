@@ -2120,8 +2120,16 @@ class _WorkHoursScreenState extends State<WorkHoursScreen> {
                             }
                           } else {
                             if (incomeId != null) {
-                              provider.deleteIncome(incomeId);
-                              incomeId = null;
+                              try {
+                                final deleted = provider.deleteIncome(incomeId);
+                                if (deleted) {
+                                  incomeId = null;
+                                }
+                              } catch (e) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+                                );
+                              }
                             }
                           }
 
