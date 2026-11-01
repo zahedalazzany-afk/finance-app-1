@@ -76,10 +76,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
               child: const Text('إلغاء')),
           TextButton(
             onPressed: () {
-              if (provider.deleteProduct(product.id)) {
+              final reason = provider.productDeleteBlockReason(product.id);
+              if (reason == null && provider.deleteProduct(product.id)) {
                 Navigator.pop(context);
               } else {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('لا يمكن حذف المنتج لأنه مستخدم في المخزون أو المشتريات أو الحركات.')));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('لا يمكن حذف المنتج: ${reason ?? 'تعذّر الحذف'}.')));
               }
             },
             child:

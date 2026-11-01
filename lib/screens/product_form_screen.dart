@@ -92,6 +92,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       unit: _selectedUnit,
       purchasePrice: double.tryParse(_purchasePriceController.text.trim()) ?? 0,
       maxPurchasePrice: double.tryParse(_maxPurchasePriceController.text.trim()) ?? 0,
+      salePrice: widget.product?.salePrice ?? 0,
       currentStock: widget.product?.currentStock ?? 0,
       minStock: double.tryParse(_minStockController.text.trim()) ?? 0,
       packageType: _packageType == 'بدون' ? null : _packageType,
