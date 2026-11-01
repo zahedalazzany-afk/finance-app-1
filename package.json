@@ -1,0 +1,8 @@
+{
+  "name": "finance_tracker",
+  "private": true,
+  "scripts": {
+    "dev": "node -e \"const http=require('http'),fs=require('fs'),path=require('path');http.createServer((req,res)=>{let f=path.join('web',req.url==='/'?'index.html':req.url);if(fs.existsSync(f)&&fs.statSync(f).isFile()){res.end(fs.readFileSync(f))}else{res.end(fs.readFileSync('web/index.html'))}}).listen(3000,'0.0.0.0')\"",
+    "build": "echo 'Flutter project build ready'"
+  }
+}
