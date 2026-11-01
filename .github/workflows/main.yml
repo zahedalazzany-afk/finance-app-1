@@ -1,1 +1,33 @@
+name: CI
 
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # الإصدار نفسه الذي سُجّل في pubspec.lock (Flutter 3.38.4)
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.38.4
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # فحص ثابت للمعلومات فقط: لا يجعل التشغيل أحمر
+      - name: Static analysis (informational)
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        continue-on-error: true
+
+      # الاختبارات هي التي تحدد نجاح التشغيل أو فشله
+      - name: Unit tests
+        run: flutter test --reporter expanded
