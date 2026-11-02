@@ -929,6 +929,20 @@ class FinanceProvider extends ChangeNotifier {
   void updateIncome(Income updated) {
     final idx = _incomes.indexWhere((i) => i.id == updated.id);
     if (idx != -1) {
+      // لا يسمح بتخفيض مبلغ الإيراد أقل من مجموع الدفعات المستلمة منه.
+      final received = updated.receivedAmount;
+      if (updated.amount < received - 0.000001) {
+        throw Exception(
+          'لا يمكن تخفيض مبلغ الإيراد أقل من مجموع الدفعات المستلمة '
+          '(${received.toStringAsFixed(2)})',
+        );
+      }
+      // إعادة احتساب الحالة وفق المبلغ الجديد والدفعات المستلمة، حتى لا تبقى
+      // الحالة "مؤكد" بعد زيادة المبلغ مع وجود مبلغ متبقٍ للتحصيل.
+      updated.status =
+          (updated.amount > 0 && updated.remainingAmount <= 0)
+              ? 'confirmed'
+              : 'pending';
       _incomes[idx] = updated;
       _saveIncomes();
       _saveRefData();
@@ -1062,6 +1076,14 @@ class FinanceProvider extends ChangeNotifier {
   void updateExpense(Expense updated) {
     final idx = _expenses.indexWhere((e) => e.id == updated.id);
     if (idx != -1) {
+      // لا يسمح بتخفيض مبلغ المصروف أقل من مجموع المدفوعات المسجلة عليه.
+      final paid = paidForExpense(updated.id);
+      if (updated.amount < paid - 0.000001) {
+        throw Exception(
+          'لا يمكن تخفيض مبلغ المصروف أقل من مجموع المدفوعات المسجلة '
+          '(${paid.toStringAsFixed(2)})',
+        );
+      }
       _validateExpenseAllocations(updated, updated.id);
       _expenses[idx] = updated;
       _syncExpenseDebt(updated);

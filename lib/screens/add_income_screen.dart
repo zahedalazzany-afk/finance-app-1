@@ -24,6 +24,7 @@ class _AddIncomeScreenState extends State<AddIncomeScreen> {
   String? _landPlotId;
   String? _zahraId;
   bool _isReceived = false;
+  bool _receivedTouched = false;
   String? _walletId;
 
   @override
@@ -45,6 +46,7 @@ class _AddIncomeScreenState extends State<AddIncomeScreen> {
       _date = e.date;
       _landPlotId = e.landPlotId;
       _zahraId = e.zahraId;
+      _walletId = e.walletId;
       _isReceived = e.status == 'confirmed';
     }
   }
@@ -98,6 +100,19 @@ class _AddIncomeScreenState extends State<AddIncomeScreen> {
     final amount = MoneyValue.parseInput(_amountController.text.trim())
         .minorUnits
         .toDouble();
+    if (widget.existing != null &&
+        amount < widget.existing!.receivedAmount - 0.000001) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'لا يمكن تخفيض مبلغ الإيراد أقل من مجموع الدفعات المستلمة '
+            '(${widget.existing!.receivedAmount.formattedFull} ر.ي)',
+          ),
+          backgroundColor: AppTheme.expenseRed,
+        ),
+      );
+      return;
+    }
     if (widget.existing != null) {
       widget.existing!
         ..title = _titleController.text.trim()
@@ -111,13 +126,18 @@ class _AddIncomeScreenState extends State<AddIncomeScreen> {
         ..zahraId = _zahraId
         ..walletId = _walletId;
       provider.updateIncome(widget.existing!);
-      if (_isReceived && widget.existing!.remainingAmount > 0) {
+      // عند التعديل لا نستلم الفرق تلقائياً لمجرد أن الإيراد كان مستلماً سابقاً؛
+      // نستلمه فقط إذا قام المستخدم بتغيير خيار "تم استلام المبلغ كاملاً" في هذه الجلسة.
+      if (_isReceived &&
+          _receivedTouched &&
+          widget.existing!.remainingAmount > 0) {
         provider.addIncomePayment(IncomePayment(
           id: const Uuid().v4(),
           incomeId: widget.existing!.id,
           amount: widget.existing!.remainingAmount,
           date: _date,
           notes: 'مستلم فوراً',
+          walletId: _walletId,
         ));
       }
     } else {
@@ -143,6 +163,7 @@ class _AddIncomeScreenState extends State<AddIncomeScreen> {
           amount: newIncome.amount,
           date: _date,
           notes: 'مستلم فوراً',
+          walletId: _walletId,
         ));
       }
     }
@@ -368,7 +389,10 @@ class _AddIncomeScreenState extends State<AddIncomeScreen> {
                   Checkbox(
                     value: _isReceived,
                     activeColor: AppTheme.incomeGreen,
-                    onChanged: (v) => setState(() => _isReceived = v ?? false),
+                    onChanged: (v) => setState(() {
+                      _isReceived = v ?? false;
+                      _receivedTouched = true;
+                    }),
                   ),
                 ],
               ),

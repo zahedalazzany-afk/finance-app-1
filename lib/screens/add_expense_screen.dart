@@ -153,6 +153,22 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     final totalAmount = MoneyValue.parseInput(_amountController.text.trim())
         .minorUnits
         .toDouble();
+    if (widget.existing != null) {
+      final paid =
+          context.read<FinanceProvider>().paidForExpense(widget.existing!.id);
+      if (totalAmount < paid - 0.000001) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'لا يمكن تخفيض مبلغ المصروف أقل من مجموع المدفوعات المسجلة '
+              '(${paid.formattedFull} ر.ي)',
+            ),
+            backgroundColor: AppTheme.expenseRed,
+          ),
+        );
+        return;
+      }
+    }
     if (_paymentMethod == 'debt') {
       if (_personId == null) {
         setState(() => _allocationError = 'اختر الدائن (المورد أو التاجر)');

@@ -2084,6 +2084,15 @@ class _WorkHoursScreenState extends State<WorkHoursScreen> {
                             if (incomeId != null) {
                               final existingInc = provider.incomes.firstWhereOrNull((i) => i.id == incomeId);
                               if (existingInc != null) {
+                                final received = existingInc.receivedAmount;
+                                if (totalAmt < received - 0.000001) {
+                                  _showError(
+                                    context,
+                                    'تعذر الحفظ',
+                                    'مبلغ الإيراد لا يمكن أن يقل عن مجموع الدفعات المستلمة (${received.formattedFull} ر.ي)',
+                                  );
+                                  return;
+                                }
                                 existingInc.title = incomeTitle;
                                 existingInc.amount = totalAmt;
                                 existingInc.date = fStart;
