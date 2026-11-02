@@ -7,6 +7,8 @@ import '../models/models.dart';
 import '../theme.dart';
 import '../widgets/data_export_import_button.dart';
 import 'add_income_screen.dart';
+import 'add_income_screen_v1.dart';
+import 'add_income_screen_v2.dart';
 import 'income_detail_screen.dart';
 
 class IncomesScreen extends StatefulWidget {
@@ -42,6 +44,144 @@ class _IncomesScreenState extends State<IncomesScreen> {
     if (_dateFilter != 'all') count++;
     if (_sortBy != 'newest') count++;
     return count;
+  }
+
+  void _showAddIncomeVariantsDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.cardBorder,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Icon(Icons.style_rounded, color: AppTheme.incomeGreen),
+                  const SizedBox(width: 8),
+                  Text(
+                    'اختر تصميم شاشة الإيراد للمعاينة',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'اختر التصميم المناسب لتجربته، وسنعتمد الأفضل ونحذف البقية بناءً على اختيارك:',
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+              ),
+              const SizedBox(height: 20),
+
+              // Option 1: إيرادات ١
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: AppTheme.incomeGreen.withOpacity(0.5)),
+                ),
+                tileColor: AppTheme.incomeGreen.withOpacity(0.1),
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.incomeGreen,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text('١', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16)),
+                ),
+                title: const Text('إيرادات ١ (نظام الخطوات والبطاقات)', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('خطوات متسلسلة، بطاقات مرئية، وحقول إدخال موجهة'),
+                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: AppTheme.incomeGreen),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AddIncomeScreenV1()),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+
+              // Option 2: إيرادات ٢
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: Colors.blueAccent.withOpacity(0.5)),
+                ),
+                tileColor: Colors.blueAccent.withOpacity(0.1),
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blueAccent,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text('٢', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                ),
+                title: const Text('إيرادات ٢ (اللوحة الرقمية والشرائح الذكية)', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('عرض مالي ضخم، شرائح اختيار تفاعلية، وتحويل نمط كاش/آجل'),
+                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.blueAccent),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AddIncomeScreenV2()),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+
+              // Option 3: التصميم الأساسي
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: AppTheme.cardBorder),
+                ),
+                tileColor: AppTheme.surface,
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.cardBorder,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.assignment_outlined, color: Colors.white),
+                ),
+                title: const Text('التصميم الأساسي (النموذج المباشر)'),
+                subtitle: const Text('النموذج التقليدي الحالي لإدخال بيانات الإيراد'),
+                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AddIncomeScreen()),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _resetFilters() {
@@ -108,10 +248,7 @@ class _IncomesScreenState extends State<IncomesScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const AddIncomeScreen()),
-        ),
+        onPressed: _showAddIncomeVariantsDialog,
         backgroundColor: AppTheme.incomeGreen,
         foregroundColor: Colors.black,
         icon: const Icon(Icons.add_rounded, size: 22),
