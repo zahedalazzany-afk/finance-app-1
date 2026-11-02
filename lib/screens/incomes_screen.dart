@@ -9,6 +9,8 @@ import '../widgets/data_export_import_button.dart';
 import 'add_income_screen.dart';
 import 'add_income_screen_v1.dart';
 import 'add_income_screen_v2.dart';
+import 'incomes_screen_v1.dart';
+import 'incomes_screen_v2.dart';
 import 'income_detail_screen.dart';
 
 class IncomesScreen extends StatefulWidget {
@@ -196,6 +198,88 @@ class _IncomesScreenState extends State<IncomesScreen> {
     });
   }
 
+  Widget _buildMainDesignSwitcherHeader() {
+    return Container(
+      color: AppTheme.card,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.purpleAccent.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.purpleAccent),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.dashboard_outlined, size: 14, color: Colors.purpleAccent),
+                SizedBox(width: 4),
+                Text('التصميم الأساسي', style: TextStyle(color: Colors.purpleAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+          const Spacer(),
+          PopupMenuButton<String>(
+            icon: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.cardBorder),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('معاينة تصميم آخر', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  SizedBox(width: 4),
+                  Icon(Icons.swap_horiz_rounded, size: 16),
+                ],
+              ),
+            ),
+            onSelected: (val) {
+              if (val == 'v1') {
+                Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const IncomesScreenV1()));
+              } else if (val == 'v2') {
+                Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const IncomesScreenV2()));
+              }
+            },
+            itemBuilder: (ctx) => [
+              const PopupMenuItem(
+                value: 'main',
+                child: Row(
+                  children: [
+                    Icon(Icons.check, color: Colors.purpleAccent, size: 18),
+                    SizedBox(width: 8),
+                    Text('التصميم الأساسي', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purpleAccent)),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'v1',
+                child: Row(
+                  children: [
+                    SizedBox(width: 26),
+                    Text('إيرادات ١ (اللوحة التنفيذية ومؤشر التحصيل)'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'v2',
+                child: Row(
+                  children: [
+                    SizedBox(width: 26),
+                    Text('إيرادات ٢ (الدفتر الزمني وتجميع الأراضي)'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -255,8 +339,12 @@ class _IncomesScreenState extends State<IncomesScreen> {
         label: const Text('إيراد جديد',
             style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
       ),
-      body: Consumer<FinanceProvider>(
-        builder: (context, provider, _) {
+      body: Column(
+        children: [
+          _buildMainDesignSwitcherHeader(),
+          Expanded(
+            child: Consumer<FinanceProvider>(
+              builder: (context, provider, _) {
           final allIncomes = provider.incomes;
 
           if (allIncomes.isEmpty) {
@@ -1888,8 +1976,8 @@ class _IncomesScreenState extends State<IncomesScreen> {
                 ],
               ),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
