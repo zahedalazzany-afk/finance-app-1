@@ -146,6 +146,13 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     });
   }
 
+  void _showSubmitError(Object e) {
+    final msg = e.toString().replaceFirst('Exception: ', '');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: AppTheme.expenseRed),
+    );
+  }
+
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _allocationError = null);
@@ -154,8 +161,9 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         .minorUnits
         .toDouble();
     if (widget.existing != null) {
-      final paid =
-          context.read<FinanceProvider>().paidForExpense(widget.existing!.id);
+      final paid = context
+          .read<FinanceProvider>()
+          .paidTotalForExpense(widget.existing!.id);
       if (totalAmount < paid - 0.000001) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -196,10 +204,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         ..currency = baseCurrencyCode
         ..exchangeRate = 1.0
         ..allocations = [];
-      if (widget.existing == null) {
-        provider.addExpense(expense);
-      } else {
-        provider.updateExpense(expense);
+      try {
+        if (widget.existing == null) {
+          provider.addExpense(expense);
+        } else {
+          provider.updateExpense(expense);
+        }
+      } catch (e) {
+        _showSubmitError(e);
+        return;
       }
       Navigator.pop(context);
       return;
@@ -313,6 +326,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     }
 
     if (widget.existing != null) {
+      // تحويل مصروف آجل سُدِّد منه شيء إلى نقدي كان يحذف دينه وتسوياته.
+      final methodBlocker = provider.expenseMethodChangeBlocker(
+        widget.existing!.id,
+        newMethod: 'cash',
+      );
+      if (methodBlocker != null) {
+        _showSubmitError(methodBlocker);
+        return;
+      }
       widget.existing!
         ..title = _titleController.text.trim()
         ..amount = totalAmount
@@ -326,7 +348,12 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         ..currency = expCurrency
         ..exchangeRate = expRate
         ..allocations = allocations;
-      provider.updateExpense(widget.existing!);
+      try {
+        provider.updateExpense(widget.existing!);
+      } catch (e) {
+        _showSubmitError(e);
+        return;
+      }
     } else {
       final newExpense = Expense(
         id: const Uuid().v4(),
@@ -342,7 +369,12 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         exchangeRate: expRate,
         allocations: allocations,
       );
-      provider.addExpense(newExpense);
+      try {
+        provider.addExpense(newExpense);
+      } catch (e) {
+        _showSubmitError(e);
+        return;
+      }
     }
     Navigator.pop(context);
   }

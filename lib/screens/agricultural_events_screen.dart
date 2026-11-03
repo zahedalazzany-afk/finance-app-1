@@ -2491,18 +2491,10 @@ class _AgriculturalEventsScreenState extends State<AgriculturalEventsScreen> {
                               walletId: el.walletId!,
                               funding: funding,
                             ));
-                          } else if (el.paymentMode == 'debt' && el.personId != null) {
-                            provider.addPersonalDebt(PersonalDebt(
-                              id: const Uuid().v4(),
-                              personId: el.personId!,
-                              direction: 'payable',
-                              amount: amount,
-                              date: day.date,
-                              note: 'مصروف حدث: $eventType ($title)',
-                              eventId: eventId,
-                              expenseId: expId,
-                            ));
                           }
+                          // الدين الآجل (paymentMode == 'debt') يُنشأ تلقائياً داخل
+                          // addExpense عبر _syncExpenseDebt، فلا نُنشئه هنا مرة ثانية
+                          // (كان ذلك يضاعف الالتزام على المورد).
                         }
 
                         // حفظ المواد المستهلكة لهذا اليوم

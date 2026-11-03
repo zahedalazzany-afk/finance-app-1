@@ -94,6 +94,13 @@ class _AddIncomeScreenState extends State<AddIncomeScreen> {
     });
   }
 
+  void _showSubmitError(Object e) {
+    final msg = e.toString().replaceFirst('Exception: ', '');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: AppTheme.expenseRed),
+    );
+  }
+
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     final provider = context.read<FinanceProvider>();
@@ -113,59 +120,89 @@ class _AddIncomeScreenState extends State<AddIncomeScreen> {
       );
       return;
     }
-    if (widget.existing != null) {
-      widget.existing!
-        ..title = _titleController.text.trim()
-        ..amount = amount
-        ..source = _source
-        ..date = _date
-        ..note = _noteController.text.trim().isEmpty
-            ? null
-            : _noteController.text.trim()
-        ..landPlotId = _landPlotId
-        ..zahraId = _zahraId
-        ..walletId = _walletId;
-      provider.updateIncome(widget.existing!);
-      // عند التعديل لا نستلم الفرق تلقائياً لمجرد أن الإيراد كان مستلماً سابقاً؛
-      // نستلمه فقط إذا قام المستخدم بتغيير خيار "تم استلام المبلغ كاملاً" في هذه الجلسة.
-      if (_isReceived &&
-          _receivedTouched &&
-          widget.existing!.remainingAmount > 0) {
-        provider.addIncomePayment(IncomePayment(
-          id: const Uuid().v4(),
-          incomeId: widget.existing!.id,
-          amount: widget.existing!.remainingAmount,
-          date: _date,
-          notes: 'مستلم فوراً',
-          walletId: _walletId,
-        ));
-      }
-    } else {
-      final newIncome = Income(
-        id: const Uuid().v4(),
-        title: _titleController.text.trim(),
-        amount: amount,
-        date: _date,
-        source: _source,
-        note: _noteController.text.trim().isEmpty
-            ? null
-            : _noteController.text.trim(),
-        landPlotId: _landPlotId,
-        zahraId: _zahraId,
-        walletId: _walletId,
-        status: 'pending',
+
+    // استلام المبلغ يحتاج محفظة؛ نتحقق قبل أي حفظ حتى لا يُحفظ إيراد بلا دفعة.
+    final needsPayment = widget.existing == null
+        ? _isReceived
+        : (_isReceived &&
+            _receivedTouched &&
+            amount - widget.existing!.receivedAmount > 0.000001);
+    if (needsPayment && (_walletId == null || _walletId!.trim().isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('اختر المحفظة لتسجيل استلام المبلغ'),
+          backgroundColor: AppTheme.expenseRed,
+        ),
       );
-      provider.addIncome(newIncome);
-      if (_isReceived) {
-        provider.addIncomePayment(IncomePayment(
+      return;
+    }
+
+    try {
+      if (widget.existing != null) {
+        widget.existing!
+          ..title = _titleController.text.trim()
+          ..amount = amount
+          ..source = _source
+          ..date = _date
+          ..note = _noteController.text.trim().isEmpty
+              ? null
+              : _noteController.text.trim()
+          ..landPlotId = _landPlotId
+          ..zahraId = _zahraId
+          ..walletId = _walletId;
+        provider.updateIncome(widget.existing!);
+        // عند التعديل لا نستلم الفرق تلقائياً لمجرد أن الإيراد كان مستلماً سابقاً؛
+        // نستلمه فقط إذا قام المستخدم بتغيير خيار "تم استلام المبلغ كاملاً" في هذه الجلسة.
+        if (_isReceived &&
+            _receivedTouched &&
+            widget.existing!.remainingAmount > 0) {
+          provider.addIncomePayment(IncomePayment(
+            id: const Uuid().v4(),
+            incomeId: widget.existing!.id,
+            amount: widget.existing!.remainingAmount,
+            date: _date,
+            notes: 'مستلم فوراً',
+            walletId: _walletId,
+          ));
+        }
+      } else {
+        final newIncome = Income(
           id: const Uuid().v4(),
-          incomeId: newIncome.id,
-          amount: newIncome.amount,
+          title: _titleController.text.trim(),
+          amount: amount,
           date: _date,
-          notes: 'مستلم فوراً',
+          source: _source,
+          note: _noteController.text.trim().isEmpty
+              ? null
+              : _noteController.text.trim(),
+          landPlotId: _landPlotId,
+          zahraId: _zahraId,
           walletId: _walletId,
-        ));
+          status: 'pending',
+        );
+        provider.addIncome(newIncome);
+        if (_isReceived) {
+          try {
+            provider.addIncomePayment(IncomePayment(
+              id: const Uuid().v4(),
+              incomeId: newIncome.id,
+              amount: newIncome.amount,
+              date: _date,
+              notes: 'مستلم فوراً',
+              walletId: _walletId,
+            ));
+          } catch (_) {
+            // لا نترك إيراداً بلا دفعة لم يطلبها المستخدم.
+            try {
+              provider.deleteIncome(newIncome.id);
+            } catch (_) {}
+            rethrow;
+          }
+        }
       }
+    } catch (e) {
+      _showSubmitError(e);
+      return;
     }
     Navigator.pop(context);
   }

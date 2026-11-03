@@ -29,6 +29,39 @@ class _PersonalDebtsScreenState extends State<PersonalDebtsScreen> {
     super.dispose();
   }
 
+  Future<void> _confirmMergeDuplicateDebts(BuildContext context) async {
+    final provider = context.read<FinanceProvider>();
+    final groups = provider.duplicateExpenseDebtGroups();
+    if (groups.isEmpty) return;
+    final extra = groups.fold<int>(0, (s, g) => s + g.length - 1);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ديون مكررة'),
+        content: Text(
+          'يوجد $extra دين مكرر لمصروفات آجلة (أكثر من دين لنفس المصروف). '
+          'سيُبقى دين واحد لكل مصروف ويُحذف المكرر. '
+          'لا يُحذف أي دين عليه تسويات.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('تنظيف'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final removed = provider.mergeDuplicateExpenseDebts();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('تم حذف $removed دين مكرر')),
+    );
+  }
+
   String _formatTimeAgo(DateTime date) {
     final now = DateTime.now();
     final diff = now.difference(date);
@@ -204,6 +237,12 @@ class _PersonalDebtsScreenState extends State<PersonalDebtsScreen> {
           style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
         ),
         actions: [
+          if (provider.duplicateExpenseDebtGroups().isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.cleaning_services_outlined),
+              tooltip: 'ديون مكررة لنفس المصروف',
+              onPressed: () => _confirmMergeDuplicateDebts(context),
+            ),
           IconButton(
             icon: const Icon(Icons.swap_horiz_rounded),
             tooltip: 'ديون العمال والمشتريات',
