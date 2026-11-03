@@ -1047,7 +1047,6 @@ class FinanceProvider extends ChangeNotifier {
           date: expense.date,
           note: expense.note ?? 'مصروف آجل: ${expense.title}',
           expenseId: expense.id,
-          eventId: expense.eventId,
         ));
       } else {
         linkedDebt
@@ -1057,7 +1056,6 @@ class FinanceProvider extends ChangeNotifier {
           ..date = expense.date
           ..note = expense.note ?? 'مصروف آجل: ${expense.title}'
           ..expenseId = expense.id
-          ..eventId = expense.eventId ?? linkedDebt.eventId
           ..walletId = null
           ..funding = [];
       }
@@ -1078,22 +1076,14 @@ class FinanceProvider extends ChangeNotifier {
   void updateExpense(Expense updated) {
     final idx = _expenses.indexWhere((e) => e.id == updated.id);
     if (idx != -1) {
-      // لا يسمح بتخفيض مبلغ المصروف أقل من مجموع المدفوعات المسجلة عليه
-      // (دفعات المصروف + تسويات دينه الآجل).
-      final paid = paidTotalForExpense(updated.id);
+      // لا يسمح بتخفيض مبلغ المصروف أقل من مجموع المدفوعات المسجلة عليه.
+      final paid = paidForExpense(updated.id);
       if (updated.amount < paid - 0.000001) {
         throw Exception(
           'لا يمكن تخفيض مبلغ المصروف أقل من مجموع المدفوعات المسجلة '
           '(${paid.toStringAsFixed(2)})',
         );
       }
-      // تغيير مصروف آجل مسدَّد جزئياً إلى نقدي كان يحذف دينه وتسوياته.
-      final methodBlocker = expenseMethodChangeBlocker(
-        updated.id,
-        newMethod: updated.paymentMethod,
-        newPersonId: updated.personId,
-      );
-      if (methodBlocker != null) throw Exception(methodBlocker);
       _validateExpenseAllocations(updated, updated.id);
       _expenses[idx] = updated;
       _syncExpenseDebt(updated);
@@ -2180,72 +2170,6 @@ class FinanceProvider extends ChangeNotifier {
   double paidForExpense(String expenseId) => _expensePayments
       .where((p) => p.expenseId == expenseId)
       .fold(0.0, (s, p) => s + p.amount);
-
-  /// مجموع ما سُدِّد من المصروف: دفعات المصروف + تسويات دينه الآجل إن وُجد.
-  double paidTotalForExpense(String expenseId) {
-    final debtPaid = _personalDebts
-        .where((d) => d.expenseId == expenseId)
-        .fold<double>(0, (s, d) => s + personalDebtPaid(d.id));
-    return paidForExpense(expenseId) + debtPaid;
-  }
-
-  /// سبب منع تغيير طريقة دفع المصروف بحيث يزول دينه الآجل، أو null.
-  /// تغيير مصروف آجل إلى نقدي يحذف دينه وتسوياته وحركاتها النقدية، لذلك
-  /// نمنعه إذا سُدِّد منه شيء عبر تسويات الدين.
-  String? expenseMethodChangeBlocker(String expenseId,
-      {required String? newMethod, String? newPersonId}) {
-    final linkedDebt =
-        _personalDebts.firstWhereOrNull((d) => d.expenseId == expenseId);
-    if (linkedDebt == null) return null;
-    final keepsDebt = newMethod == 'debt' && newPersonId != null;
-    if (keepsDebt) return null;
-    if (_personalDebtSettlements.any((s) => s.debtId == linkedDebt.id)) {
-      return 'سُدِّدت دفعات من هذا المصروف الآجل؛ احذف تسوياته أولاً '
-          'قبل تغيير طريقة الدفع';
-    }
-    return null;
-  }
-
-  /// مجموعات الديون المكررة لنفس المصروف (أكثر من دين مرتبط بالمصروف نفسه).
-  /// كان إنشاء الدين الآجل يتم مرتين من شاشة الأحداث فيتضاعف الالتزام.
-  List<List<PersonalDebt>> duplicateExpenseDebtGroups() {
-    final byExpense = <String, List<PersonalDebt>>{};
-    for (final d in _personalDebts) {
-      final eid = d.expenseId;
-      if (eid == null || eid.isEmpty) continue;
-      byExpense.putIfAbsent(eid, () => []).add(d);
-    }
-    return byExpense.values.where((g) => g.length > 1).toList();
-  }
-
-  /// يدمج الديون المكررة لنفس المصروف: يُبقي دينًا واحدًا ويحذف الباقي.
-  /// لا يحذف أي دين عليه تسويات، وإذا كان في المجموعة أكثر من دين عليه
-  /// تسويات تُترك المجموعة كما هي لمراجعتها يدويًا. يعيد عدد الديون المحذوفة.
-  int mergeDuplicateExpenseDebts() {
-    var removed = 0;
-    for (final group in duplicateExpenseDebtGroups()) {
-      final withSettlements = group
-          .where((d) => _personalDebtSettlements.any((s) => s.debtId == d.id))
-          .toList();
-      if (withSettlements.length > 1) continue;
-      final keeper = withSettlements.isNotEmpty
-          ? withSettlements.first
-          : group.firstWhere((d) => d.eventId != null,
-              orElse: () => group.first);
-      for (final d in group) {
-        if (d.id == keeper.id) continue;
-        if (_personalDebtSettlements.any((s) => s.debtId == d.id)) continue;
-        keeper.eventId ??= d.eventId;
-        _removePersonalDebtData(d.id);
-        removed++;
-      }
-    }
-    if (removed > 0) {
-      _saveRefData();
-      notifyListeners();
-    }
-    return removed;
-  }
 
   double expenseRemainingAmount(String expenseId) {
     final e = _expenses.firstWhereOrNull((ex) => ex.id == expenseId);
@@ -4130,14 +4054,6 @@ class FinanceProvider extends ChangeNotifier {
         debt.amount <= 0 ||
         (debt.walletId != null && debt.walletId!.trim().isEmpty) ||
         _personalDebts.any((d) => d.id == debt.id)) {
-      return false;
-    }
-
-    // لكل مصروف آجل دين واحد فقط؛ الدين يُنشأ تلقائياً عبر addExpense
-    // (_syncExpenseDebt)، وإنشاء دين ثانٍ لنفس المصروف يضاعف الالتزام.
-    if (debt.expenseId != null &&
-        debt.expenseId!.isNotEmpty &&
-        _personalDebts.any((d) => d.expenseId == debt.expenseId)) {
       return false;
     }
 
