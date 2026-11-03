@@ -8,8 +8,8 @@ import '../theme.dart';
 import '../widgets/data_export_import_button.dart';
 import 'add_income_screen.dart';
 import 'income_detail_screen.dart';
-import 'incomes_screen_v2.dart';
 import 'incomes_screen.dart';
+import 'incomes_screen_v2.dart';
 
 class IncomesScreenV1 extends StatefulWidget {
   const IncomesScreenV1({super.key});
@@ -33,6 +33,16 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
     super.dispose();
   }
 
+  int get _activeFiltersCount {
+    int count = 0;
+    if (_statusFilter != 'all') count++;
+    if (_selectedPlotId != null) count++;
+    if (_selectedWalletId != null) count++;
+    if (_dateFilter != 'all') count++;
+    if (_sortBy != 'newest') count++;
+    return count;
+  }
+
   void _resetFilters() {
     setState(() {
       _searchController.clear();
@@ -45,16 +55,18 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
     });
   }
 
-  void _showAddPaymentDialog(Income income) {
+  Future<void> _showAddPaymentDialog(Income income) async {
     final provider = context.read<FinanceProvider>();
     final amountController = TextEditingController(
       text: income.remainingAmount > 0 ? income.remainingAmount.toInt().toString() : '',
     );
     final noteController = TextEditingController();
-    String? walletId = provider.defaultWallet()?.id ?? (provider.wallets.isNotEmpty ? provider.wallets.first.id : null);
+    String? walletId = income.walletId ??
+        provider.defaultWallet()?.id ??
+        (provider.wallets.isNotEmpty ? provider.wallets.first.id : null);
     DateTime paymentDate = DateTime.now();
 
-    showDialog(
+    await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
@@ -62,9 +74,18 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Row(
             children: [
-              const Icon(Icons.add_card_rounded, color: AppTheme.incomeGreen),
-              const SizedBox(width: 8),
-              const Text('تحصيل دفعة إيراد (إيرادات ١)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.incomeGreen.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.add_card_rounded, color: AppTheme.incomeGreen, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('تحصيل دفعة إيراد', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
             ],
           ),
           content: SingleChildScrollView(
@@ -72,46 +93,106 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  income.title,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'المبلغ المتبقي: ${income.remainingAmount.formattedFull} ر.ي من إجمالي ${income.amount.formattedFull} ر.ي',
-                  style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.cardBorder),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        income.title,
+                        style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('المتبقي للتحصيل:', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                          Text(
+                            '${income.remainingAmount.formattedFull} ر.ي',
+                            style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: amountController,
                   keyboardType: TextInputType.number,
                   style: const TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 18),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'مبلغ الدفعة المستلمة (ر.ي) *',
-                    prefixIcon: Icon(Icons.attach_money, color: AppTheme.incomeGreen),
+                    hintText: '0',
+                    prefixIcon: const Icon(Icons.attach_money, color: AppTheme.incomeGreen),
+                    filled: true,
+                    fillColor: AppTheme.surface,
                   ),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   value: walletId,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'إيداع إلى المحفظة *',
-                    prefixIcon: Icon(Icons.account_balance_wallet_rounded),
+                    prefixIcon: const Icon(Icons.account_balance_wallet_rounded),
+                    filled: true,
+                    fillColor: AppTheme.surface,
                   ),
                   items: provider.wallets
                       .map((w) => DropdownMenuItem(
                             value: w.id,
-                            child: Text(w.name),
+                            child: Text('${w.name} (${w.balance.formattedFull} ر.ي)'),
                           ))
                       .toList(),
                   onChanged: (v) => setDialogState(() => walletId = v),
                 ),
                 const SizedBox(height: 12),
+                InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: paymentDate,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null) {
+                      setDialogState(() => paymentDate = picked);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.cardBorder),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today_rounded, size: 18, color: AppTheme.incomeGreen),
+                        const SizedBox(width: 10),
+                        Text(
+                          DateFormat('yyyy/MM/dd').format(paymentDate),
+                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                        ),
+                        const Spacer(),
+                        const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: noteController,
-                  decoration: const InputDecoration(
-                    labelText: 'ملاحظة أو بيان الدفعة',
-                    prefixIcon: Icon(Icons.notes_rounded),
+                  decoration: InputDecoration(
+                    labelText: 'ملاحظة أو بيان الدفعة (اختياري)',
+                    prefixIcon: const Icon(Icons.notes_rounded),
+                    filled: true,
+                    fillColor: AppTheme.surface,
                   ),
                 ),
               ],
@@ -128,25 +209,62 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                 foregroundColor: Colors.black,
               ),
               onPressed: () {
-                final amt = double.tryParse(amountController.text.trim()) ?? 0;
-                if (amt <= 0) return;
-                if (walletId == null) return;
-                if (amt > income.remainingAmount + 0.01) {
+                final input = amountController.text.trim();
+                if (input.isEmpty) return;
+
+                double amt = 0;
+                try {
+                  amt = MoneyValue.parseInput(input).minorUnits.toDouble();
+                } catch (e) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('مبلغ الدفعة يتجاوز المتبقي')),
+                    const SnackBar(content: Text('المبلغ يجب أن يكون رقماً صحيحاً صالحاً'), backgroundColor: AppTheme.expenseRed),
                   );
                   return;
                 }
 
-                provider.addIncomePayment(IncomePayment(
-                  id: const Uuid().v4(),
-                  incomeId: income.id,
-                  amount: amt,
-                  date: paymentDate,
-                  notes: noteController.text.trim().isEmpty ? 'تحصيل دفعة' : noteController.text.trim(),
-                  walletId: walletId,
-                ));
-                Navigator.pop(ctx);
+                if (amt <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('يجب أن يكون المبلغ أكبر من صفر'), backgroundColor: AppTheme.expenseRed),
+                  );
+                  return;
+                }
+                if (walletId == null || walletId!.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('اختر المحفظة لإيداع الدفعة'), backgroundColor: AppTheme.expenseRed),
+                  );
+                  return;
+                }
+                if (amt > income.remainingAmount + 0.000001) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('مبلغ الدفعة يتجاوز المتبقي (${income.remainingAmount.formattedFull} ر.ي)'),
+                      backgroundColor: AppTheme.expenseRed,
+                    ),
+                  );
+                  return;
+                }
+
+                try {
+                  provider.addIncomePayment(IncomePayment(
+                    id: const Uuid().v4(),
+                    incomeId: income.id,
+                    amount: amt,
+                    date: paymentDate,
+                    notes: noteController.text.trim().isEmpty ? 'تحصيل دفعة' : noteController.text.trim(),
+                    walletId: walletId,
+                  ));
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('تم تسجيل دفعة الإيراد بنجاح'), backgroundColor: AppTheme.incomeGreen),
+                  );
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(e.toString().replaceFirst('Exception: ', '')),
+                      backgroundColor: AppTheme.expenseRed,
+                    ),
+                  );
+                }
               },
               child: const Text('حفظ الدفعة', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
@@ -170,7 +288,10 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
             Text('تأكيد حذف الإيراد', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ],
         ),
-        content: Text('هل أنت أؤكد حذف الإيراد "${income.title}" والمدفوعات والحصص المرتبطة به؟'),
+        content: Text(
+          'هل تريد بالتأكيد حذف الإيراد "${income.title}"؟\nسيتم أيضاً إزالة سجلات الدفعات والمصروفات والتوزيعات المرتبطة به.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -183,7 +304,8 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
             ),
             onPressed: () {
               try {
-                provider.deleteIncome(income.id);
+                final deleted = provider.deleteIncome(income.id);
+                if (!deleted) return;
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('تم حذف الإيراد بنجاح')),
@@ -191,13 +313,171 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
               } catch (e) {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(e.toString()), backgroundColor: AppTheme.expenseRed),
+                  SnackBar(
+                    content: Text(e.toString().replaceFirst('Exception: ', '')),
+                    backgroundColor: AppTheme.expenseRed,
+                  ),
                 );
               }
             },
-            child: const Text('حذف النهائي'),
+            child: const Text('حذف'),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showFilterBottomSheet(FinanceProvider provider) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.filter_list_rounded, color: AppTheme.incomeGreen),
+                          SizedBox(width: 8),
+                          Text('تصفية وفرز متقدم', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          _resetFilters();
+                          Navigator.pop(ctx);
+                        },
+                        child: const Text('إعادة ضبط الكل', style: TextStyle(color: Colors.orange)),
+                      ),
+                    ],
+                  ),
+                  const Divider(),
+                  const SizedBox(height: 10),
+
+                  // Sort Options
+                  const Text('الترتيب حسب:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      {'id': 'newest', 'label': 'الأحدث تاريخاً'},
+                      {'id': 'oldest', 'label': 'الأقدم تاريخاً'},
+                      {'id': 'amount_desc', 'label': 'الأعلى مبلغاً'},
+                      {'id': 'remaining_desc', 'label': 'الأعلى متبقياً'},
+                    ].map((s) {
+                      final isSel = _sortBy == s['id'];
+                      return ChoiceChip(
+                        selected: isSel,
+                        label: Text(s['label']!),
+                        selectedColor: AppTheme.incomeGreen,
+                        labelStyle: TextStyle(color: isSel ? Colors.black : AppTheme.textPrimary, fontSize: 12),
+                        onSelected: (_) {
+                          setState(() => _sortBy = s['id']!);
+                          setSheetState(() {});
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Date Filter
+                  const Text('النطاق الزمني:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      {'id': 'all', 'label': 'كل الفترات'},
+                      {'id': 'this_month', 'label': 'هذا الشهر'},
+                      {'id': 'last_month', 'label': 'الشهر الماضي'},
+                      {'id': 'this_year', 'label': 'هذا العام'},
+                    ].map((d) {
+                      final isSel = _dateFilter == d['id'];
+                      return ChoiceChip(
+                        selected: isSel,
+                        label: Text(d['label']!),
+                        selectedColor: AppTheme.incomeGreen,
+                        labelStyle: TextStyle(color: isSel ? Colors.black : AppTheme.textPrimary, fontSize: 12),
+                        onSelected: (_) {
+                          setState(() => _dateFilter = d['id']!);
+                          setSheetState(() {});
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Land Plot Filter
+                  const Text('حسب الموضع (الأرض):', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String?>(
+                    value: _selectedPlotId,
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: AppTheme.surface,
+                      prefixIcon: const Icon(Icons.terrain_rounded, color: Colors.amber),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('جميع المواضع')),
+                      ...provider.landPlots.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name))),
+                    ],
+                    onChanged: (v) {
+                      setState(() => _selectedPlotId = v);
+                      setSheetState(() {});
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Wallet Filter
+                  const Text('حسب المحفظة المستلمة:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String?>(
+                    value: _selectedWalletId,
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: AppTheme.surface,
+                      prefixIcon: const Icon(Icons.account_balance_wallet_rounded, color: Colors.blueAccent),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('جميع المحافظ')),
+                      ...provider.wallets.map((w) => DropdownMenuItem(value: w.id, child: Text(w.name))),
+                    ],
+                    onChanged: (v) {
+                      setState(() => _selectedWalletId = v);
+                      setSheetState(() {});
+                    },
+                  ),
+                  const SizedBox(height: 20),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.incomeGreen,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('تطبيق التصفية', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -294,9 +574,40 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
           DataExportImportButton(
             label: 'الإيرادات',
             buildRows: () => context.read<FinanceProvider>().incomes.map((e) => e.toJson()).toList(),
-            csvHeaders: const ['المعرّف', 'العنوان', 'المبلغ', 'التاريخ', 'المصدر', 'الحالة'],
-            csvKeys: const ['id', 'title', 'amount', 'date', 'source', 'status'],
-            onImport: (rows) async {},
+            csvHeaders: const [
+              'المعرّف',
+              'العنوان',
+              'المبلغ',
+              'التاريخ',
+              'المصدر',
+              'ملاحظات',
+              'معرّف الموضع',
+              'معرّف الزرعة',
+              'معرّف المحفظة',
+              'الحالة',
+            ],
+            csvKeys: const [
+              'id',
+              'title',
+              'amount',
+              'date',
+              'source',
+              'note',
+              'landPlotId',
+              'zahraId',
+              'walletId',
+              'status',
+            ],
+            onImport: (rows) async {
+              final provider = context.read<FinanceProvider>();
+              for (final row in rows) {
+                try {
+                  final income = Income.fromJson(row);
+                  if (provider.incomes.any((e) => e.id == income.id)) continue;
+                  provider.addIncome(income);
+                } catch (_) {}
+              }
+            },
           ),
         ],
       ),
@@ -334,9 +645,9 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                     final notesMatch = (income.note ?? '').toLowerCase().contains(q);
                     if (!titleMatch && !sourceMatch && !notesMatch) return false;
                   }
-                  if (_statusFilter == 'fully_paid' && income.remainingAmount > 0.01) return false;
-                  if (_statusFilter == 'unpaid' && income.receivedAmount > 0.01) return false;
-                  if (_statusFilter == 'partially_paid' && (income.receivedAmount <= 0.01 || income.remainingAmount <= 0.01)) return false;
+                  if (_statusFilter == 'fully_paid' && income.remainingAmount > 0.000001) return false;
+                  if (_statusFilter == 'unpaid' && income.receivedAmount > 0.000001) return false;
+                  if (_statusFilter == 'partially_paid' && (income.receivedAmount <= 0.000001 || income.remainingAmount <= 0.000001)) return false;
                   if (_selectedPlotId != null && income.landPlotId != _selectedPlotId) return false;
                   if (_selectedWalletId != null && income.walletId != _selectedWalletId) return false;
 
@@ -374,11 +685,48 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Quick Filter Pills
-                    _buildStatusPillTabs(allIncomes),
-                    const SizedBox(height: 16),
+                    // Quick Filter Pills & Filter Button
+                    Row(
+                      children: [
+                        Expanded(child: _buildStatusPillTabs(allIncomes)),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: () => _showFilterBottomSheet(provider),
+                          style: IconButton.styleFrom(
+                            backgroundColor: _activeFiltersCount > 0 ? AppTheme.incomeGreen : AppTheme.surface,
+                            foregroundColor: _activeFiltersCount > 0 ? Colors.black : AppTheme.textPrimary,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(color: AppTheme.cardBorder),
+                            ),
+                          ),
+                          icon: Badge(
+                            isLabelVisible: _activeFiltersCount > 0,
+                            label: Text('$_activeFiltersCount'),
+                            child: const Icon(Icons.tune_rounded, size: 20),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
 
-                    // Search & Filter Bar
+                    // Active Filters Summary tag if any
+                    if (_activeFiltersCount > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Row(
+                          children: [
+                            Text('$_activeFiltersCount فلاتر مفعّلة', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                            const SizedBox(width: 8),
+                            InkWell(
+                              onTap: _resetFilters,
+                              child: const Text('إلغاء الفلاتر', style: TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    // Search Bar
                     _buildSearchBar(),
                     const SizedBox(height: 16),
 
@@ -387,6 +735,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                       _buildEmptyState()
                     else
                       ...filteredIncomes.map((inc) => _buildExecutiveIncomeCard(inc, provider)),
+                    const SizedBox(height: 60),
                   ],
                 );
               },
@@ -519,8 +868,8 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
   }
 
   Widget _buildStatusPillTabs(List<Income> all) {
-    final fullyPaidCount = all.where((i) => i.remainingAmount <= 0.01).length;
-    final pendingCount = all.where((i) => i.remainingAmount > 0.01).length;
+    final fullyPaidCount = all.where((i) => i.remainingAmount <= 0.000001).length;
+    final pendingCount = all.where((i) => i.remainingAmount > 0.000001).length;
 
     final tabs = [
       {'id': 'all', 'label': 'الكل (${all.length})'},
@@ -585,10 +934,11 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
   }
 
   Widget _buildExecutiveIncomeCard(Income inc, FinanceProvider provider) {
-    final isFullyPaid = inc.remainingAmount <= 0.01;
+    final isFullyPaid = inc.remainingAmount <= 0.000001;
     final progress = inc.amount > 0 ? (inc.receivedAmount / inc.amount).clamp(0.0, 1.0) : 0.0;
     final plot = provider.landPlots.firstWhereOrNull((p) => p.id == inc.landPlotId);
     final zahra = provider.zahras.firstWhereOrNull((z) => z.id == inc.zahraId);
+    final wallet = provider.wallets.firstWhereOrNull((w) => w.id == inc.walletId);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -631,17 +981,49 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                       style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 15),
                     ),
                     const SizedBox(height: 4),
-                    Row(
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
                       children: [
-                        Text(inc.source, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-                        if (plot != null) ...[
-                          Text(' • ', style: TextStyle(color: AppTheme.textMuted)),
-                          Text(plot.name, style: const TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.w600)),
-                        ],
-                        if (zahra != null) ...[
-                          Text(' • ', style: TextStyle(color: AppTheme.textMuted)),
-                          Text(zahra.name, style: const TextStyle(color: Colors.pinkAccent, fontSize: 12, fontWeight: FontWeight.w600)),
-                        ],
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.surface,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: AppTheme.cardBorder),
+                          ),
+                          child: Text(inc.source, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                        ),
+                        if (plot != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                            ),
+                            child: Text(plot.name, style: const TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
+                        if (zahra != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.pinkAccent.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.pinkAccent.withOpacity(0.3)),
+                            ),
+                            child: Text(zahra.name, style: const TextStyle(color: Colors.pinkAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
+                        if (wallet != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blueAccent.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+                            ),
+                            child: Text(wallet.name, style: const TextStyle(color: Colors.blueAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
                       ],
                     ),
                   ],
@@ -656,7 +1038,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    DateFormat('dd/MM/yyyy').format(inc.date),
+                    DateFormat('yyyy/MM/dd').format(inc.date),
                     style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                   ),
                 ],
@@ -665,7 +1047,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
           ),
           const SizedBox(height: 12),
 
-          // Mini collection progress bar
+          // Collection progress bar
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -731,6 +1113,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.edit_outlined, size: 18, color: Colors.blueAccent),
+                tooltip: 'تعديل',
                 onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => AddIncomeScreen(existing: inc)),
@@ -738,6 +1121,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline_rounded, size: 18, color: AppTheme.expenseRed),
+                tooltip: 'حذف',
                 onPressed: () => _confirmDeleteIncome(inc),
               ),
             ],
