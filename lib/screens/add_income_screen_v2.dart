@@ -270,7 +270,7 @@ class _AddIncomeScreenV2State extends State<AddIncomeScreenV2> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
+              Row(
                 children: [
                   Icon(Icons.monetization_on_rounded, color: AppTheme.incomeGreen, size: 20),
                   SizedBox(width: 6),
@@ -284,7 +284,7 @@ class _AddIncomeScreenV2State extends State<AddIncomeScreenV2> {
                   color: AppTheme.incomeGreen.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text('ريال يمني YER',
+                child: Text('ريال يمني YER',
                     style: TextStyle(color: AppTheme.incomeGreen, fontSize: 11, fontWeight: FontWeight.bold)),
               ),
             ],
@@ -295,7 +295,7 @@ class _AddIncomeScreenV2State extends State<AddIncomeScreenV2> {
             keyboardType: TextInputType.number,
             textAlign: TextAlign.center,
             onChanged: (_) => setState(() {}),
-            style: const TextStyle(
+            style: TextStyle(
               color: AppTheme.incomeGreen,
               fontSize: 34,
               fontWeight: FontWeight.w900,
@@ -325,7 +325,7 @@ class _AddIncomeScreenV2State extends State<AddIncomeScreenV2> {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
-              children: [5000, 25000, 50000, 100000, 500000].map((preset) {
+              children: [5000.0, 25000.0, 50000.0, 100000.0, 500000.0].map((preset) {
                 return Padding(
                   padding: const EdgeInsets.only(left: 6),
                   child: InkWell(
@@ -597,7 +597,7 @@ class _AddIncomeScreenV2State extends State<AddIncomeScreenV2> {
                 onTap: _pickDateTime,
                 child: Row(
                   children: [
-                    const Icon(Icons.event_note_rounded, color: AppTheme.incomeGreen),
+                    Icon(Icons.event_note_rounded, color: AppTheme.incomeGreen),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -634,7 +634,7 @@ class _AddIncomeScreenV2State extends State<AddIncomeScreenV2> {
                 items: provider.wallets
                     .map((w) => DropdownMenuItem(
                           value: w.id,
-                          child: Text('${w.name} - [رصيد: ${w.balance.formattedFull} ر.ي]'),
+                          child: Text('${w.name} - [رصيد: ${provider.walletBalance(w.id).formattedFull} ر.ي]'),
                         ))
                     .toList(),
                 onChanged: (v) => setState(() => _walletId = v),

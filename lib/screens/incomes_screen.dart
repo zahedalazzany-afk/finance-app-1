@@ -75,7 +75,7 @@ class _IncomesScreenState extends State<IncomesScreen> {
               const SizedBox(height: 16),
               Row(
                 children: [
-                  const Icon(Icons.style_rounded, color: AppTheme.incomeGreen),
+                  Icon(Icons.style_rounded, color: AppTheme.incomeGreen),
                   const SizedBox(width: 8),
                   Text(
                     'اختر تصميم شاشة الإيراد للمعاينة',
@@ -112,7 +112,7 @@ class _IncomesScreenState extends State<IncomesScreen> {
                 ),
                 title: const Text('إيرادات ١ (نظام الخطوات والبطاقات)', style: TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: const Text('خطوات متسلسلة، بطاقات مرئية، وحقول إدخال موجهة'),
-                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: AppTheme.incomeGreen),
+                trailing: Icon(Icons.arrow_forward_ios_rounded, size: 16, color: AppTheme.incomeGreen),
                 onTap: () {
                   Navigator.pop(ctx);
                   Navigator.push(
@@ -537,6 +537,9 @@ class _IncomesScreenState extends State<IncomesScreen> {
           );
         },
       ),
+    ),
+  ],
+),
     );
   }
 
@@ -1976,8 +1979,8 @@ class _IncomesScreenState extends State<IncomesScreen> {
                 ],
               ),
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

@@ -80,7 +80,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                   color: AppTheme.incomeGreen.withOpacity(0.2),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.add_card_rounded, color: AppTheme.incomeGreen, size: 20),
+                child: Icon(Icons.add_card_rounded, color: AppTheme.incomeGreen, size: 20),
               ),
               const SizedBox(width: 10),
               const Expanded(
@@ -125,11 +125,11 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                 TextField(
                   controller: amountController,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 18),
+                  style: TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 18),
                   decoration: InputDecoration(
                     labelText: 'مبلغ الدفعة المستلمة (ر.ي) *',
                     hintText: '0',
-                    prefixIcon: const Icon(Icons.attach_money, color: AppTheme.incomeGreen),
+                    prefixIcon: Icon(Icons.attach_money, color: AppTheme.incomeGreen),
                     filled: true,
                     fillColor: AppTheme.surface,
                   ),
@@ -146,7 +146,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                   items: provider.wallets
                       .map((w) => DropdownMenuItem(
                             value: w.id,
-                            child: Text('${w.name} (${w.balance.formattedFull} ر.ي)'),
+                            child: Text('${w.name} (${provider.walletBalance(w.id).formattedFull} ر.ي)'),
                           ))
                       .toList(),
                   onChanged: (v) => setDialogState(() => walletId = v),
@@ -173,7 +173,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.calendar_today_rounded, size: 18, color: AppTheme.incomeGreen),
+                        Icon(Icons.calendar_today_rounded, size: 18, color: AppTheme.incomeGreen),
                         const SizedBox(width: 10),
                         Text(
                           DateFormat('yyyy/MM/dd').format(paymentDate),
@@ -217,20 +217,20 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                   amt = MoneyValue.parseInput(input).minorUnits.toDouble();
                 } catch (e) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('المبلغ يجب أن يكون رقماً صحيحاً صالحاً'), backgroundColor: AppTheme.expenseRed),
+                    SnackBar(content: const Text('المبلغ يجب أن يكون رقماً صحيحاً صالحاً'), backgroundColor: AppTheme.expenseRed),
                   );
                   return;
                 }
 
                 if (amt <= 0) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('يجب أن يكون المبلغ أكبر من صفر'), backgroundColor: AppTheme.expenseRed),
+                    SnackBar(content: const Text('يجب أن يكون المبلغ أكبر من صفر'), backgroundColor: AppTheme.expenseRed),
                   );
                   return;
                 }
                 if (walletId == null || walletId!.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('اختر المحفظة لإيداع الدفعة'), backgroundColor: AppTheme.expenseRed),
+                    SnackBar(content: const Text('اختر المحفظة لإيداع الدفعة'), backgroundColor: AppTheme.expenseRed),
                   );
                   return;
                 }
@@ -255,7 +255,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                   ));
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('تم تسجيل دفعة الإيراد بنجاح'), backgroundColor: AppTheme.incomeGreen),
+                    SnackBar(content: const Text('تم تسجيل دفعة الإيراد بنجاح'), backgroundColor: AppTheme.incomeGreen),
                   );
                 } catch (e) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -281,7 +281,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
+        title: Row(
           children: [
             Icon(Icons.warning_amber_rounded, color: AppTheme.expenseRed),
             SizedBox(width: 8),
@@ -346,7 +346,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Row(
+                      Row(
                         children: [
                           Icon(Icons.filter_list_rounded, color: AppTheme.incomeGreen),
                           SizedBox(width: 8),
@@ -495,7 +495,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: AppTheme.incomeGreen),
             ),
-            child: const Row(
+            child: Row(
               children: [
                 Icon(Icons.auto_awesome, size: 14, color: AppTheme.incomeGreen),
                 SizedBox(width: 4),
@@ -529,7 +529,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
               }
             },
             itemBuilder: (ctx) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'v1',
                 child: Row(
                   children: [
@@ -786,14 +786,14 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: AppTheme.incomeGreen.withOpacity(0.4)),
                 ),
-                child: Text('$count عملية', style: const TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 12)),
+                child: Text('$count عملية', style: TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 12)),
               ),
             ],
           ),
           const SizedBox(height: 16),
           Text(
             '${totalIncome.formattedFull} ر.ي',
-            style: const TextStyle(color: AppTheme.incomeGreen, fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+            style: TextStyle(color: AppTheme.incomeGreen, fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: 0.5),
           ),
           const SizedBox(height: 16),
 
@@ -805,7 +805,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('نسبة المحصّل للمحفظة: ${(ratio * 100).toStringAsFixed(1)}%', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                  Text('${totalReceived.formattedFull} ر.ي', style: const TextStyle(color: AppTheme.incomeGreen, fontSize: 12, fontWeight: FontWeight.bold)),
+                  Text('${totalReceived.formattedFull} ر.ي', style: TextStyle(color: AppTheme.incomeGreen, fontSize: 12, fontWeight: FontWeight.bold)),
                 ],
               ),
               const SizedBox(height: 6),
@@ -815,7 +815,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                   value: ratio.clamp(0.0, 1.0),
                   minHeight: 10,
                   backgroundColor: Colors.white12,
-                  valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.incomeGreen),
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.incomeGreen),
                 ),
               ),
             ],
@@ -837,7 +837,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                     children: [
                       const Text('المستلم المحصل', style: TextStyle(color: Colors.white54, fontSize: 11)),
                       const SizedBox(height: 2),
-                      Text('${totalReceived.formattedFull} ر.ي', style: const TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 13)),
+                      Text('${totalReceived.formattedFull} ر.ي', style: TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 13)),
                     ],
                   ),
                 ),
@@ -916,7 +916,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
         decoration: InputDecoration(
           hintText: 'بحث باسم الإيراد، المزرعة، أو الملاحظة...',
           hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 13),
-          prefixIcon: const Icon(Icons.search_rounded, color: AppTheme.incomeGreen),
+          prefixIcon: Icon(Icons.search_rounded, color: AppTheme.incomeGreen),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
                   icon: const Icon(Icons.clear_rounded, size: 18),
@@ -1034,7 +1034,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                 children: [
                   Text(
                     '${inc.amount.formattedFull} ر.ي',
-                    style: const TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.w900, fontSize: 16),
+                    style: TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.w900, fontSize: 16),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -1120,7 +1120,7 @@ class _IncomesScreenV1State extends State<IncomesScreenV1> {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.delete_outline_rounded, size: 18, color: AppTheme.expenseRed),
+                icon: Icon(Icons.delete_outline_rounded, size: 18, color: AppTheme.expenseRed),
                 tooltip: 'حذف',
                 onPressed: () => _confirmDeleteIncome(inc),
               ),

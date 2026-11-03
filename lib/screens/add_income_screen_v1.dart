@@ -197,7 +197,7 @@ class _AddIncomeScreenV1State extends State<AddIncomeScreenV1> {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: AppTheme.incomeGreen.withOpacity(0.5)),
               ),
-              child: const Text('إيرادات ١',
+              child: Text('إيرادات ١',
                   style: TextStyle(color: AppTheme.incomeGreen, fontSize: 13, fontWeight: FontWeight.bold)),
             ),
             const SizedBox(width: 10),
@@ -292,7 +292,7 @@ class _AddIncomeScreenV1State extends State<AddIncomeScreenV1> {
                   children: [
                     Text(
                       amountVal.formattedFull,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppTheme.incomeGreen,
                         fontSize: 22,
                         fontWeight: FontWeight.w900,
@@ -421,14 +421,14 @@ class _AddIncomeScreenV1State extends State<AddIncomeScreenV1> {
           controller: _amountController,
           keyboardType: TextInputType.number,
           onChanged: (_) => setState(() {}),
-          style: const TextStyle(
+          style: TextStyle(
             color: AppTheme.incomeGreen,
             fontSize: 22,
             fontWeight: FontWeight.bold,
           ),
           decoration: InputDecoration(
             labelText: 'المبلغ الإجمالي (ر.ي)',
-            prefixIcon: const Icon(Icons.attach_money_rounded, color: AppTheme.incomeGreen),
+            prefixIcon: Icon(Icons.attach_money_rounded, color: AppTheme.incomeGreen),
             suffixIcon: IconButton(
               icon: const Icon(Icons.backspace_outlined, size: 20),
               onPressed: () => setState(() => _amountController.clear()),
@@ -453,11 +453,11 @@ class _AddIncomeScreenV1State extends State<AddIncomeScreenV1> {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: [10000, 50000, 100000, 500000, 1000000].map((inc) {
+          children: [10000.0, 50000.0, 100000.0, 500000.0, 1000000.0].map((inc) {
             return ActionChip(
               backgroundColor: AppTheme.surface,
               side: BorderSide(color: AppTheme.cardBorder),
-              avatar: const Icon(Icons.add, size: 14, color: AppTheme.incomeGreen),
+              avatar: Icon(Icons.add, size: 14, color: AppTheme.incomeGreen),
               label: Text('+${inc.formattedFull}'),
               labelStyle: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
               onPressed: () => _addAmountIncrement(inc.toDouble()),
@@ -485,7 +485,7 @@ class _AddIncomeScreenV1State extends State<AddIncomeScreenV1> {
                         value: s,
                         child: Row(
                           children: [
-                            const Icon(Icons.nature_outlined, size: 18, color: AppTheme.incomeGreen),
+                            Icon(Icons.nature_outlined, size: 18, color: AppTheme.incomeGreen),
                             const SizedBox(width: 10),
                             Text(s),
                           ],
@@ -605,7 +605,7 @@ class _AddIncomeScreenV1State extends State<AddIncomeScreenV1> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.calendar_month_rounded, color: AppTheme.incomeGreen),
+                    Icon(Icons.calendar_month_rounded, color: AppTheme.incomeGreen),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -642,7 +642,7 @@ class _AddIncomeScreenV1State extends State<AddIncomeScreenV1> {
               items: provider.wallets
                   .map((w) => DropdownMenuItem(
                         value: w.id,
-                        child: Text('${w.name} (${w.balance.formattedFull} ر.ي)'),
+                        child: Text('${w.name} (${provider.walletBalance(w.id).formattedFull} ر.ي)'),
                       ))
                   .toList(),
               onChanged: (v) => setState(() => _walletId = v),

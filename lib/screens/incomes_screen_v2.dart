@@ -97,11 +97,11 @@ class _IncomesScreenV2State extends State<IncomesScreenV2> {
                 TextField(
                   controller: amountController,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 18),
+                  style: TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 18),
                   decoration: InputDecoration(
                     labelText: 'مبلغ الدفعة المستلمة (ر.ي) *',
                     hintText: '0',
-                    prefixIcon: const Icon(Icons.attach_money, color: AppTheme.incomeGreen),
+                    prefixIcon: Icon(Icons.attach_money, color: AppTheme.incomeGreen),
                     filled: true,
                     fillColor: AppTheme.surface,
                   ),
@@ -118,7 +118,7 @@ class _IncomesScreenV2State extends State<IncomesScreenV2> {
                   items: provider.wallets
                       .map((w) => DropdownMenuItem(
                             value: w.id,
-                            child: Text('${w.name} (${w.balance.formattedFull} ر.ي)'),
+                            child: Text('${w.name} (${provider.walletBalance(w.id).formattedFull} ر.ي)'),
                           ))
                       .toList(),
                   onChanged: (v) => setDialogState(() => walletId = v),
@@ -189,20 +189,20 @@ class _IncomesScreenV2State extends State<IncomesScreenV2> {
                   amt = MoneyValue.parseInput(input).minorUnits.toDouble();
                 } catch (e) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('المبلغ يجب أن يكون رقماً صحيحاً صالحاً'), backgroundColor: AppTheme.expenseRed),
+                    SnackBar(content: const Text('المبلغ يجب أن يكون رقماً صحيحاً صالحاً'), backgroundColor: AppTheme.expenseRed),
                   );
                   return;
                 }
 
                 if (amt <= 0) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('يجب أن يكون المبلغ أكبر من صفر'), backgroundColor: AppTheme.expenseRed),
+                    SnackBar(content: const Text('يجب أن يكون المبلغ أكبر من صفر'), backgroundColor: AppTheme.expenseRed),
                   );
                   return;
                 }
                 if (walletId == null || walletId!.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('اختر المحفظة لإيداع الدفعة'), backgroundColor: AppTheme.expenseRed),
+                    SnackBar(content: const Text('اختر المحفظة لإيداع الدفعة'), backgroundColor: AppTheme.expenseRed),
                   );
                   return;
                 }
@@ -227,7 +227,7 @@ class _IncomesScreenV2State extends State<IncomesScreenV2> {
                   ));
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('تم تسجيل دفعة الإيراد بنجاح'), backgroundColor: AppTheme.incomeGreen),
+                    SnackBar(content: const Text('تم تسجيل دفعة الإيراد بنجاح'), backgroundColor: AppTheme.incomeGreen),
                   );
                 } catch (e) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -253,7 +253,7 @@ class _IncomesScreenV2State extends State<IncomesScreenV2> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
+        title: Row(
           children: [
             Icon(Icons.warning_amber_rounded, color: AppTheme.expenseRed),
             SizedBox(width: 8),
@@ -759,7 +759,7 @@ class _IncomesScreenV2State extends State<IncomesScreenV2> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text('${inc.amount.formattedFull} ر.ي', style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.incomeGreen, fontSize: 14)),
+                      Text('${inc.amount.formattedFull} ر.ي', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.incomeGreen, fontSize: 14)),
                       const SizedBox(height: 2),
                       Text(
                         isPaid ? 'مستلم بالكامل' : 'متبقي: ${inc.remainingAmount.formattedFull}',
@@ -809,7 +809,7 @@ class _IncomesScreenV2State extends State<IncomesScreenV2> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18, color: AppTheme.expenseRed),
+                    icon: Icon(Icons.delete_outline_rounded, size: 18, color: AppTheme.expenseRed),
                     tooltip: 'حذف',
                     onPressed: () => _confirmDeleteIncome(inc),
                   ),
@@ -898,7 +898,7 @@ class _IncomesScreenV2State extends State<IncomesScreenV2> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text('${inc.amount.formattedFull} ر.ي', style: const TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 13)),
+                        Text('${inc.amount.formattedFull} ر.ي', style: TextStyle(color: AppTheme.incomeGreen, fontWeight: FontWeight.bold, fontSize: 13)),
                         Text(
                           isPaid ? 'مستلم' : 'متبقي: ${inc.remainingAmount.formattedFull}',
                           style: TextStyle(color: isPaid ? AppTheme.incomeGreen : Colors.orange, fontSize: 10, fontWeight: FontWeight.bold),
@@ -957,7 +957,7 @@ class _IncomesScreenV2State extends State<IncomesScreenV2> {
                             ],
                           ),
                         ),
-                        const PopupMenuItem(
+                        PopupMenuItem(
                           value: 'delete',
                           child: Row(
                             children: [
