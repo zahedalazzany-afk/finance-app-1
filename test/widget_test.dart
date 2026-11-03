@@ -88,20 +88,16 @@ void main() {
     );
     provider.addExpense(directDebtExpense);
 
-    final debtRecord = PersonalDebt(
-      id: 'debt-p1',
-      personId: supplier.id,
-      direction: 'payable',
-      amount: 150,
-      date: DateTime.now(),
-      note: 'مصروف حدث: ${event.eventType}',
-      eventId: event.id,
-      expenseId: directDebtExpense.id,
-    );
-    provider.addPersonalDebt(debtRecord);
+    // addExpense ينشئ الدين المرتبط بالمصروف الآجل تلقائياً: دين واحد فقط
+    // يحمل معرّف الحدث (كان الاختبار يضيف دينًا ثانيًا فيثبّت الدين المضاعف).
+    final linkedDebts = provider.personalDebts
+        .where((d) => d.expenseId == directDebtExpense.id)
+        .toList();
+    expect(linkedDebts.length, 1);
+    expect(linkedDebts.first.eventId, event.id);
+    expect(provider.personalDebtRemaining(linkedDebts.first.id), 150);
 
     expect(provider.expensesForEvent(event.id).length, 1);
-    expect(provider.personalDebtRemaining(debtRecord.id), 150);
 
     // Proposal 3: Worker with partial payment (wage: 200, cash: 80, debt: 120)
     final income = Income(
@@ -118,6 +114,7 @@ void main() {
       incomeId: 'inc-1',
       amount: 500,
       date: DateTime.now(),
+      walletId: wallet.id,
     );
     provider.addIncomePayment(incPayment);
 
@@ -200,6 +197,7 @@ void main() {
       date: DateTime.now(),
       currency: 'SAR',
       exchangeRate: 140.0,
+      walletId: wallet.id,
     );
     provider.addIncomePayment(paymentSar);
 
