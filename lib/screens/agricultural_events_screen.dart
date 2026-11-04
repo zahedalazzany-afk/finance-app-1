@@ -2370,6 +2370,64 @@ class _AgriculturalEventsScreenState extends State<AgriculturalEventsScreen> {
                         }
                       }
 
+                      // حماية السجل المالي عند تعديل حدث موجود: السطر الذي له دفعات أو
+                      // تسويات يبقى كما هو ولا يُعدَّل من هنا، ولا يُحذف إلا ما لا سجل له.
+                      // نتحقق من كل شيء قبل أي تغيير حتى لا يبقى الحفظ جزئياً.
+                      final lockedIds = <String>{};
+                      if (existing != null) {
+                        final snapshots = <EventLineSnapshot>[];
+                        for (final day in dailyLogs) {
+                          final dateKey = DateFormat('yyyy-MM-dd').format(day.date);
+                          for (final wl in day.laborLines) {
+                            if (wl.workerId == null) continue;
+                            final wage = tryParseFlexible(wl.wageController.text) ?? 0;
+                            if (wage <= 0) continue;
+                            final paidNow = wl.paymentMode == 'cash'
+                                ? wage
+                                : (wl.paymentMode == 'debt'
+                                    ? 0.0
+                                    : (tryParseFlexible(wl.paidController.text) ?? 0));
+                            snapshots.add(EventLineSnapshot(
+                              existingId: wl.existingId,
+                              isLabor: true,
+                              workerId: wl.workerId,
+                              amount: wage,
+                              paymentMode: wl.paymentMode,
+                              paid: paidNow,
+                              dateKey: dateKey,
+                              walletId: wl.walletId,
+                              funding: wl.fundingKey.currentState?.allocations ?? const [],
+                            ));
+                          }
+                          for (final el in day.expenseLines) {
+                            final amountNow = tryParseFlexible(el.amountController.text) ?? 0;
+                            if (amountNow <= 0) continue;
+                            snapshots.add(EventLineSnapshot(
+                              existingId: el.existingId,
+                              isLabor: false,
+                              personId: el.personId,
+                              amount: amountNow,
+                              paymentMode: el.paymentMode,
+                              paid: el.paymentMode == 'cash' ? amountNow : 0.0,
+                              dateKey: dateKey,
+                              walletId: el.walletId,
+                              funding: el.fundingKey.currentState?.allocations ?? const [],
+                            ));
+                          }
+                        }
+                        final blocker = provider.eventEditBlocker(existing.id, snapshots);
+                        if (blocker != null) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(blocker),
+                            backgroundColor: AppTheme.expenseRed,
+                          ));
+                          return;
+                        }
+                        for (final e in provider.expensesForEvent(existing.id)) {
+                          if (provider.expenseHasFinancialHistory(e.id)) lockedIds.add(e.id);
+                        }
+                      }
+
                       final eventId = existing?.id ?? const Uuid().v4();
                       final firstDate = dailyLogs.isNotEmpty ? dailyLogs.first.date : startDate;
 
@@ -2397,9 +2455,11 @@ class _AgriculturalEventsScreenState extends State<AgriculturalEventsScreen> {
                         provider.deleteInventoryTransaction(ot.id);
                       }
 
-                      // حذف المصاريف القديمة لتحديثها بناء على اليوميات
+                      // حذف المصاريف القديمة التي لا سجل مالياً لها فقط لإعادة بنائها
+                      // من اليوميات؛ ما له دفعات أو تسويات يبقى كما هو.
                       final oldExpenses = provider.expensesForEvent(eventId);
                       for (final oe in oldExpenses) {
+                        if (lockedIds.contains(oe.id)) continue;
                         provider.deleteExpense(oe.id);
                       }
 
@@ -2414,6 +2474,11 @@ class _AgriculturalEventsScreenState extends State<AgriculturalEventsScreen> {
                           final paid = wl.paymentMode == 'cash'
                               ? wage
                               : (wl.paymentMode == 'debt' ? 0.0 : (tryParseFlexible(wl.paidController.text) ?? 0));
+
+                          // سطر مسجَّل عليه دفعات أو تسويات: يبقى كما هو.
+                          if (wl.existingId != null && lockedIds.contains(wl.existingId)) {
+                            continue;
+                          }
 
                           final worker = provider.workers.firstWhereOrNull((w) => w.id == wl.workerId);
                           final expId = const Uuid().v4();
@@ -2467,6 +2532,11 @@ class _AgriculturalEventsScreenState extends State<AgriculturalEventsScreen> {
                           final title = el.titleController.text.trim().isEmpty
                               ? 'مصروف تشغيل'
                               : el.titleController.text.trim();
+
+                          // سطر مسجَّل عليه دفعات أو تسويات: يبقى كما هو.
+                          if (el.existingId != null && lockedIds.contains(el.existingId)) {
+                            continue;
+                          }
 
                           final expId = const Uuid().v4();
                           final expense = Expense(
