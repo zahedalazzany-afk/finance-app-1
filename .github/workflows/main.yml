@@ -23,10 +23,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # فحص ثابت للمعلومات فقط: لا يجعل التشغيل أحمر
-      - name: Static analysis (informational)
+      # أخطاء التحليل (compile errors) تُفشل التشغيل؛ التحذيرات والملاحظات لا تفشله.
+      # مهم لأن الاختبارات لا تغطي ملفات الشاشات، فهذا الفحص هو ما يكشف أخطاء التجميع فيها.
+      - name: Static analysis (errors only)
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
-        continue-on-error: true
 
       # الاختبارات هي التي تحدد نجاح التشغيل أو فشله
       - name: Unit tests
