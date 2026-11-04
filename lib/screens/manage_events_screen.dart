@@ -628,6 +628,43 @@ class ManageEventsScreen extends StatefulWidget {
                         }
                       }
 
+                      // حماية السجل المالي: لا نحذف أو نعيد بناء أجر عليه دفعات أو تسويات
+                      // عند تعديل الحدث. نتحقق قبل أي تغيير حتى لا يبقى الحفظ جزئياً.
+                      if (existing != null) {
+                        final plannedLabor = laborLines.where((l) =>
+                            l.workerId != null &&
+                            (tryParseFlexible(l.daysController.text) ?? 0) > 0 &&
+                            (tryParseFlexible(l.rateController.text) ?? 0) > 0).toList();
+                        final plannedCash = paymentType == 'cash' && walletId != null;
+                        final toDelete = <String>{};
+                        for (final e in provider.expensesForEvent(existing.id)
+                            .where((x) => x.workerId != null)) {
+                          final l = plannedLabor
+                              .firstWhereOrNull((x) => x.existingId == e.id);
+                          if (l == null) {
+                            toDelete.add(e.id);
+                            continue;
+                          }
+                          final plannedDays = tryParseFlexible(l.daysController.text) ?? 0;
+                          final plannedRate = tryParseFlexible(l.rateController.text) ?? 0;
+                          final plannedAmount = plannedDays * plannedRate;
+                          final wasCash = provider.paidForExpense(e.id) >= e.amount;
+                          final same = e.workerId == l.workerId &&
+                              e.amount == plannedAmount &&
+                              (e.wageDays ?? 0) == plannedDays &&
+                              (e.wageRate ?? 0) == plannedRate;
+                          if (!(same && plannedCash == wasCash)) toDelete.add(e.id);
+                        }
+                        final blocker = provider.eventExpenseDeletionBlocker(toDelete);
+                        if (blocker != null) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(blocker),
+                            backgroundColor: AppTheme.expenseRed,
+                          ));
+                          return;
+                        }
+                      }
+
                       if (existing != null) {
                         existing.landPlotId = landPlotId!;
                         existing.eventType = eventType;
